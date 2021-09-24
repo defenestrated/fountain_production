@@ -78,7 +78,7 @@ boolean debug = true,  // flag to turn on/off serial output
   need_to_log = true,
   SDokay = true,
   force_log = false,
-  log_pos = true, sd_log = true; // flags to note whether we've logged positions during moves (either to serial or eventually to SD)
+  log_pos = true, sd_log = true, already_written = false; // flags to note whether we've logged positions during moves
 
 // initiate stepper array (will be populated in setup)
 Stepper *master_steppers[4] = { NULL, NULL, NULL, NULL };
@@ -99,21 +99,21 @@ boolean newData = false;
 
 void dealwithit() {
   if (debug) {
-    Serial.print("c: ");
-    Serial.println(HWmsg);
-    Serial.print("i1: ");
-    Serial.println(HWint1);
-    Serial.print("i2: ");
-    Serial.println(HWint2);
+    // Serial.print("c: ");
+    // Serial.println(HWmsg);
+    // Serial.print("i1: ");
+    // Serial.println(HWint1);
+    // Serial.print("i2: ");
+    // Serial.println(HWint2);
   }
 
   if (strcmp(HWmsg, "a") == 0) {
     positions[HWint1 + 4] = HWint2;
-    need_to_log = true;
-    sd_log = true;
+    // need_to_log = true;
+    // sd_log = true;
     log_position();
 
-    if (debug) Serial.println("received positions. new positions:");
+    if (debug) Serial.print("received secondary positions. new positions: ");
     for (int i = 0; i < 6; i++) {
       if (debug) Serial.print(positions[i]);
       if (debug) Serial.print(" ");
@@ -128,14 +128,14 @@ void setup() {
     if (mockup) {
       whole_revs[i] = mockup_revs[i] * microsteps;
       avg_sens_widths[i] = mockup_sens_widths[i] * microsteps;
-      // speeds[i] = mockup_speeds[i] * microsteps;
-      speeds[i] = mockup_speeds[i] * 2;
+      speeds[i] = mockup_speeds[i] * microsteps;
+      // speeds[i] = mockup_speeds[i] * 2;
     }
     else {
       whole_revs[i] = build_revs[i] * microsteps;
       avg_sens_widths[i] = build_sens_widths[i] * microsteps;
-      // speeds[i] = build_speeds[i] * microsteps;
-      speeds[i] = build_speeds[i] * 2;
+      speeds[i] = build_speeds[i] * microsteps;
+      // speeds[i] = build_speeds[i] * 2;
     }
   }
 
@@ -203,6 +203,8 @@ void setup() {
     master_controllers[i] = new StepControl();
   }
 
+  while (millis() < 2000);
+
   // initiate steppers
   for (int i = 0; i < 6; i++) {
 
@@ -216,9 +218,11 @@ void setup() {
       master_steppers[i]->setPosition(positions[i]);
     }
     else {
+if (debug) Serial.print("to secondary... ");
+      if (debug) Serial.println(i);
       hwsend('s', i-4, speeds[i]);
       hwsend('a', i-4, acceleration);
-      // hwsend('w', i-4, positions[i]);
+      hwsend('w', i-4, positions[i]);
     }
   }
 
@@ -301,8 +305,8 @@ void loop() {
     if (debug) Serial.println();
     positionreset = true;
     cyclestarted = false;
-    need_to_log = true;
-    sd_log = true;
+    // need_to_log = true;
+    // sd_log = true;
   }
 
   /*           SERIAL INPUT             */
@@ -343,7 +347,7 @@ void loop() {
       command = "cycle";
       break;
     case 113: // q
-      hwsend('q', 0, 0);
+      SD_read_positions();
       break;
     case 81: // Q
       force_log = true;
@@ -354,14 +358,18 @@ void loop() {
         int m = Serial.parseInt();
         int tgt = Serial.parseInt();
         if (m < 4) absolutemove(m, tgt); // motor is on this teensy
-        else hwsend('m', m, tgt); // send to 2nd teensy
+        else hwsend('m', m-4, tgt); // send to 2nd teensy
         break;
       }
     case 119: // w
       {
         int m = Serial.parseInt();
         int pos = Serial.parseInt();
-        (m < 4) ? overwriteposition(m, pos) : hwsend('w', m-4, pos);
+        if (m < 4) {
+          overwriteposition(m, pos);
+          force_log = true;
+        }
+        else hwsend('w', m-4, pos);
         break;
       }
     case 87: // W

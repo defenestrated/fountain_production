@@ -66,20 +66,20 @@ void log_position() {
     sd_log = true;
   }
 
+  for (int i = 0; i < 6; i++) {
+    sum += (prev_positions[i] == positions[i]) ? 0 : 1;
+  }
+  if (sum == 0) {
+    sd_log = false;
+    need_to_log = false;
+  }
+  else {
+    sd_log = true;
+    need_to_log = true;
+  }
 
   if (need_to_log) {
-    for (int i = 0; i < 6; i++) {
-      sum += (prev_positions[i] == positions[i]) ? 0 : 1;
-      prev_positions[i] = positions[i];
-    }
-    if (sum == 0) {
-      sd_log = false;
-      need_to_log = false;
-    }
-    else {
-      sd_log = true;
-      need_to_log = true;
-    }
+    need_to_log = false;
 
     if ((millis() % log_time < log_time/3 && log_pos == true) || force_log == true) {
       log_pos = false;
@@ -96,9 +96,9 @@ void log_position() {
       }
 
 
-      if ((millis() % sd_write_time < sd_write_time/3 && sd_log == true) || force_log == true) {
-        if (debug) Serial.println("-- logging to SD card --");
+      if ((millis() % sd_write_time < sd_write_time/3 && sd_log == true && !already_written) || force_log == true) {
         sd_log = false;
+        if (debug) Serial.println("-- logging to SD card --");
         logfile = SD.open("positions.txt", FILE_WRITE);
         if (logfile) {
           logfile.seek(0);
@@ -108,13 +108,22 @@ void log_position() {
             logfile.print((i < 5) ? ',' : '\n');
           }
           logfile.close();
+          already_written = true;
+        }
+        for (int i = 0; i < 6; i++) {
+          prev_positions[i] = positions[i];
         }
       }
+
+
 
     }
 
     if (millis() % log_time > log_time*2/3) log_pos = true;
-    if (millis() % sd_write_time > sd_write_time*2/3) sd_log = true;
+    if (millis() % sd_write_time > sd_write_time*2/3) {
+      sd_log = true;
+      already_written = false;
+    }
 
   }
   force_log = false;
@@ -173,16 +182,22 @@ void absolutemove(int m, long tgt) { // BROKEN
   if (debug) Serial.print(m, DEC);
   if (debug) Serial.print(", target: ");
   if (debug) Serial.println(tgt, DEC);
-  if (m < 4) {
+  if (is_primary) {
+    if (debug) Serial.println("primary");
     master_steppers[m]->setTargetAbs(tgt);
     master_controllers[m]->moveAsync(*master_steppers[m]);
   }
   else {
-    slave_steppers[m-4]->setTargetAbs(tgt);
-    slave_controllers[m-4]->moveAsync(*slave_steppers[m-4]);
+    if (debug) Serial.print("secondary ");
+    if (debug) Serial.print(m);
+    if (debug) Serial.print(" ");
+    if (debug) Serial.println(tgt);
+    slave_steppers[m]->setTargetAbs(tgt);
+    slave_controllers[m]->moveAsync(*slave_steppers[m]);
   }
 
   need_to_log = true;
+  sd_log = true;
 }
 
 time_t getTeensy3Time() {
@@ -204,8 +219,6 @@ void overwriteposition(int m, long pos) {
   if (debug) Serial.print(pos);
   if (debug) Serial.print(". confirmed at: ");
   positions[m] = pos;
-  need_to_log = true;
-  sd_log = true;
 
   if (is_primary) {
     master_steppers[m]->setPosition(pos);
@@ -215,6 +228,7 @@ void overwriteposition(int m, long pos) {
     slave_steppers[m]->setPosition(pos);
     if (debug) Serial.println(slave_steppers[m]->getPosition());
     hwsend('a', m, pos);
+    // force the log in primary.cpp, not here (log has to happen on primary teensy)
   }
 
 

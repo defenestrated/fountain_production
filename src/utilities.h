@@ -51,7 +51,7 @@ is_primary,
   need_to_log,
   SDokay,
   force_log,
-  log_pos, sd_log; // flags to note whether we've logged positions during moves (either to serial or eventually to SD)
+  log_pos, sd_log, already_written; // flags to note whether we've logged positions during moves
 
 extern boolean flips[6];
 extern float thetas[6];
