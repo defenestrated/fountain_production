@@ -1,81 +1,75 @@
 #include <Arduino.h>
 #include <TeensyStep.h>
+#include <TimeLib.h>
 #include <SD.h>
+#include <SPI.h>
 #include "utilities.h"
 
 #define HWSERIAL Serial1
 
+bool is_primary = true;
+
 const int chipSelect = BUILTIN_SDCARD;
 
-StepControl *controllers[4] = {NULL, NULL, NULL, NULL}; // controller objects -- one per stepper, to avoid Bresenham. first four steppers here, last two on slave.
+StepControl *master_controllers[4] = {NULL, NULL, NULL, NULL}; // controller objects -- one per stepper, to avoid Bresenham. first four steppers here, last two on slave.
+StepControl *slave_controllers[2] = { NULL, NULL };
 
 File logfile;
 
-const int indicator = LED_BUILTIN, // light
+const unsigned int indicator = LED_BUILTIN, // light
   estop = 17, // input from the e-stop.
-  microsteps = 8,
+  microsteps = 16,
   log_time = 250, // in ms, how often to report postitions.
   sd_write_time = 1000, // defines SD read/write operations, so don't make this too small
-  motor_steps_per_rev = 200; // how many steps per one motor revolution
+  motor_steps_per_rev = 400; // how many steps per one motor revolution
 int max_speed =10000, // top speed
   acceleration = 6000;  // acceleration = steps/sec/sec;
 
-int avg_sens_widths[] = {122, 124, 118, 100, 51, 110}; // rough number of steps it takes to traverse a sensor
-/* const int avg_sens_widths[] = {115, 112, 98, 100, 175, 128}; // rough number of steps it takes to traverse a sensor @ 400ustep */
-/* const int avg_sens_widths[] = {460, 448, 392, 400, 700, 512}; // rough number of steps it takes to traverse a sensor @ 1600ustep */
-/* const int avg_sens_widths[] = {14720, 14336, 12544, 12800, 22400, 16384}; // rough number of steps it takes to traverse a sensor @ 128kustep */
+long avg_sens_widths[]; // rough number of steps it takes to traverse a sensor
 
 int activeletter = 4; // for testing purposes
 String command = ""; // logical control
 
 boolean mockup = true; // set false for uploading to the real build
 
-//long whole_revs[] = { 4572, 9440, 2229, 6983, 400, 5082 }; // measured manually on the mockup
-long whole_revs[] = { 29128, 60082, 14060, 44378, 1091, 29880 }; // real build, measured manually
-/* long whole_revs[] = { 116512, 240328, 56240, 177512, 6000, 119520 }; // real build, measured * 4 for 1600ustep */
-/* long whole_revs[] = { 3728384, 7690496, 1799680, 5680384, 192000, 3824640 }; */
-const long offsets[] = {0, 0, 0, 0, 0, 0}; // distance from sensor 0 to home position
+const long mockup_revs[] = { 4572, 9440, 2229, 6983, 400, 5082 }, // measured manually on the mockup
+  build_revs[] = { 29128, 60082, 14060, 44378, 1091, 29880 }, // real build
+  offsets[] = {0, 0, 0, 0, 0, 0}, // distance from sensor 0 to home position
+  mockup_sens_widths[] = {122, 124, 118, 100, 51, 110},
+  build_sens_widths[] = {115, 112, 98, 100, 175, 128},
+  mockup_speeds[] = { 1942, 2003, 1875, 1972, 33, 1992 },
+  build_speeds[] = { 1830, 1890, 1782, 1854, 54, 2022 }
+;
+
+long whole_revs[6];
 const int revolutions[] = {6, 3, 12, 4, 2, 6}; // number of times to revolve per cycle
 long positions[6];
 long prev_positions[6];
-long period = 30; // time in seconds for one cycle
+int speeds[6];
+int period = 30; // time in seconds for one cycle
 long targets[6]; // to compare with positions[]
 
 int certainties[] = { 0, 0, 0, 0, 0, 0 };
 boolean searching = false;
 boolean flips[] = {false, true, true, false, false, false}; // real build
 float thetas[6];
-/* int speeds[] = { 1830, 1890, 1782, 1854, 54, 2022 }; // calculated speeds per ring. */
-int speeds[] = { 1942, 2003, 1875, 1972, 33, 1992 };
+
+const unsigned int txtransfergap = 50;
+boolean shouldtxtransfer = true;
 
 /* TEENSY */
 int lpins[][5] = { // letter pins. two dimensional array of [letters][pins].
 
-                  // 0      1   2     3      4
-                  // step, dir, en, sens1, sens2
-                  {2, 3, 4, 33, 34}, // 0: G1
-                  {5, 6, 7, 35, 36}, // 1: O1
-                  {8, 9, 10, 37, 38}, // 2: 02
-                  {11, 12, 24, 39, 14}, // 3: G2
-                  {25, 26, 27, 15, 0},  // 4: L
-                  {28, 29, 30, 16, 0}  // 5: E
+  // 0      1   2     3      4
+  // step, dir, en, sens1, sens2
+  {2, 3, 4, 33, 34}, // 0: G1
+  {5, 6, 7, 35, 36}, // 1: O1
+  {8, 9, 10, 37, 38}, // 2: 02
+  {11, 12, 24, 39, 14}, // 3: G2
+  {25, 26, 27, 15, 0},  // 4: L -- note that the s d e pins aren't used here
+  {28, 29, 30, 16, 0}  // 5: E -- ditto (they're on the secondary board)
 
 };
-
-
-/* MEGA */
-/* int lpins[][5] = { // letter pins. two dimensional array of [letters][pins]. */
-
-/*   // 0      1   2     3      4 */
-/*   // step, dir, en, sens1, sens2 */
-/*   {A0, A1, 38, 27, 7}, // 0: G1 */
-/*   {A6, A7, A2, 33, 4}, // 1: O1 */
-/*   {46, 48, A8, 2, 22}, // 2: 02 */
-/*   {26, 28, 24, 50, 5}, // 3: G2 */
-/*   {36, 34, 30, 3, 0},  // 4: L */
-/*   {47, 32, 45, 35, 0}  // 5: E */
-
-/* }; */
 
 boolean debug = true,  // flag to turn on/off serial output
   powertoggle = true, // indicator as to whether we've disabled the motors or not
@@ -86,9 +80,9 @@ boolean debug = true,  // flag to turn on/off serial output
   force_log = false,
   log_pos = true, sd_log = true; // flags to note whether we've logged positions during moves (either to serial or eventually to SD)
 
-
 // initiate stepper array (will be populated in setup)
-Stepper *steppers[4] = { NULL, NULL, NULL, NULL };
+Stepper *master_steppers[4] = { NULL, NULL, NULL, NULL };
+Stepper *slave_steppers[2] = { NULL, NULL };
 
 const byte numChars = 32;
 char receivedChars[numChars];
@@ -101,92 +95,219 @@ int HWint2 = 0;
 
 boolean newData = false;
 
-void recvWithStartEndMarkers() {
-    static boolean recvInProgress = false;
-    static byte ndx = 0;
-    char startMarker = '<';
-    char endMarker = '>';
-    char rc;
-
-    while (HWSERIAL.available() > 0 && newData == false) {
-        rc = HWSERIAL.read();
-
-        if (recvInProgress == true) {
-            if (rc != endMarker) {
-                receivedChars[ndx] = rc;
-                ndx++;
-                if (ndx >= numChars) {
-                    ndx = numChars - 1;
-                }
-            }
-            else {
-                receivedChars[ndx] = '\0'; // terminate the string
-                recvInProgress = false;
-                ndx = 0;
-                newData = true;
-            }
-        }
-
-        else if (rc == startMarker) {
-            recvInProgress = true;
-        }
-    }
-}
-
-//============
-
-void parseData() {
-      // split the data into its parts
-
-    char * strtokIndx; // this is used by strtok() as an index
-
-    strtokIndx = strtok(tempChars,",");      // get the first part - the string
-    strcpy(HWmsg, strtokIndx); // copy it to HWmsg
-
-    strtokIndx = strtok(NULL, ","); // this continues where the previous call left off
-    HWint1 = atoi(strtokIndx);     // convert this part to an integer
-
-    strtokIndx = strtok(NULL, ",");
-    HWint2 = atoi(strtokIndx);     // convert this part to a float
-
-}
-
 //============
 
 void dealwithit() {
+  if (debug) {
     Serial.print("c: ");
     Serial.println(HWmsg);
     Serial.print("i1: ");
     Serial.println(HWint1);
     Serial.print("i2: ");
     Serial.println(HWint2);
+  }
+
+  if (strcmp(HWmsg, "a") == 0) {
+    positions[HWint1 + 4] = HWint2;
+    need_to_log = true;
+    sd_log = true;
+    log_position();
+
+    if (debug) Serial.println("received positions. new positions:");
+    for (int i = 0; i < 6; i++) {
+      if (debug) Serial.print(positions[i]);
+      if (debug) Serial.print(" ");
+    }
+    if (debug) Serial.println();
+  }
 }
 
 void setup() {
 
+  for (int i = 0; i < 6; i++) {
+    if (mockup) {
+      whole_revs[i] = mockup_revs[i] * microsteps;
+      avg_sens_widths[i] = mockup_sens_widths[i] * microsteps;
+      // speeds[i] = mockup_speeds[i] * microsteps;
+      speeds[i] = mockup_speeds[i] * 2;
+    }
+    else {
+      whole_revs[i] = build_revs[i] * microsteps;
+      avg_sens_widths[i] = build_sens_widths[i] * microsteps;
+      // speeds[i] = build_speeds[i] * microsteps;
+      speeds[i] = build_speeds[i] * 2;
+    }
+  }
 
-  pinMode(indicator, OUTPUT);
-  Serial.begin(9600);
+  setSyncProvider(getTeensy3Time);
 
   HWSERIAL.begin(115200);
 
-  while(!Serial && millis() < 4000);
-  Serial.println("\n" __FILE__ " " __DATE__ " " __TIME__);
-  Serial.println("hi. i'm primary");
+  // initial logging
+  if (debug) {
+    Serial.begin(9600);
 
-  pinMode(2, OUTPUT);
-  digitalWrite(2, LOW);
 
+
+    while(!Serial && millis() < 4000);
+    Serial.println("=================== primary setup =====================");
+    Serial.println("source file: " __FILE__ " compiled " __DATE__ " " __TIME__);
+    Serial.println("=======================================================");
+
+
+    if (timeStatus()!= timeSet) {
+      Serial.println("Unable to sync with the RTC");
+    } else {
+      Serial.println("RTC has set the system time");
+    }
+
+    Serial.print("current time: ");
+    Serial.print(hour());
+    printDigits(minute());
+    printDigits(second());
+    Serial.print(" ");
+    Serial.print(day());
+    Serial.print(" ");
+    Serial.print(month());
+    Serial.print(" ");
+    Serial.print(year());
+    Serial.println();
+
+    Serial.print("max speed: ");
+    Serial.print(max_speed);
+    Serial.print( " accel: ");
+    Serial.print(acceleration);
+    Serial.println();
+
+  }
+
+
+  // sd init
   if (!SD.begin(chipSelect)) {
     if (debug) Serial.println("SD card initialization failed");
     SDokay = false;
   }
-  if (debug) Serial.println("SD card initialization ok");
+  else {
+    if (debug) Serial.println("SD card initialization ok");
+  }
+
+  if (SDokay) SD_read_positions();
+  else if (!SDokay) {
+    Serial.println("SD FAILURE, DOING NOTHING");
+    while(true);
+  }
+
+
+  // initiate controllers
+  for (int i = 0; i < 4; i++) {
+    master_controllers[i] = new StepControl();
+  }
+
+  // initiate steppers
+  for (int i = 0; i < 6; i++) {
+
+    if (i < 4) {
+      master_steppers[i] = new Stepper(lpins[i][0], lpins[i][1]); // step and dir
+
+      // set speeds + accelerations
+      /* master_steppers[i]->setMaxSpeed(whole_revs[i]*revolutions[i]/period); */
+      master_steppers[i]->setMaxSpeed(speeds[i]);
+      master_steppers[i]->setAcceleration(acceleration);
+      master_steppers[i]->setPosition(positions[i]);
+    }
+    else {
+      hwsend('s', i-4, speeds[i]);
+      hwsend('a', i-4, acceleration);
+      // hwsend('w', i-4, positions[i]);
+    }
+  }
+
+  // pin declarations
+  for (int s = 0; s < 6; s++) {
+    if (debug) Serial.print("== letter ");
+    if (debug) Serial.print(s);
+    if (debug) Serial.println(" ==");
+    for (int p = 0; p < 5; p++) {
+      if (lpins[s][p] != 0) {
+        if (p < 3 && s < 4) {
+          if (debug) Serial.print("setting pin to output: ");
+          if (debug) Serial.println(lpins[s][p]);
+          pinMode(lpins[s][p], OUTPUT);
+        }
+        else {
+          if (debug) Serial.print("setting pin to input_pullup: ");
+          if (debug) Serial.println(lpins[s][p]);
+          pinMode(lpins[s][p], INPUT_PULLUP);
+        }
+      }
+    }
+
+    digitalWrite(lpins[s][2], HIGH); // enable all motors
+  }
+
+  pinMode(indicator, OUTPUT);
+  pinMode(estop, INPUT);
+
+  if (debug) Serial.println("---------");
+  if (debug) Serial.print("estop status: ");
+  if (debug) Serial.println((digitalRead(estop) == HIGH) ? "high" : "low");
+
+  while (digitalRead(estop) == LOW) {
+    if (debug) Serial.println("estop active. doing nothing.");
+    delay(1000);
+  } // hang until estop is reset
+
+  if (debug) Serial.println("waiting 3secs at end of setup, just... in case.");
+  for(int i = 3; i > 0; i--) {
+    if (debug) Serial.println(i);
+    digitalWrite(indicator, HIGH);
+    delay(250);
+    digitalWrite(indicator, LOW);
+    delay(750);
+  }
+  if (debug) Serial.println("ok going...");
 }
 
 void loop() {
 
-  if (Serial.available() > 0) {
+  if (digitalRead(estop) == LOW) command = "shutoff";
+  for (int i = 0; i < 6; i++) {
+    if (i < 4) positions[i] = master_steppers[i]->getPosition();
+    else {
+      if (millis() % txtransfergap < txtransfergap * 1 / 3 && shouldtxtransfer) {
+        shouldtxtransfer = false;
+        hwsend('q', 0, 0);
+      }
+      if (millis() % txtransfergap > txtransfergap * 2 / 3) shouldtxtransfer = true;
+    }
+  }
+
+  log_position();
+
+  if (cyclestarted && !need_to_log && !positionreset) { // i.e. not moving, but started a cycle
+
+    if (debug) Serial.println("RESETTING POSITIONS");
+    for(int i=0; i<6; i++){
+      int mod = positions[i] % whole_revs[i];
+      int fromzero = (mod > whole_revs[i]/2) ? mod - whole_revs[i] : mod;
+      positions[i] = fromzero;
+      if (i < 4) { master_steppers[i]->setPosition(positions[i]);
+        if (debug) Serial.print(master_steppers[i]->getPosition());
+        if (debug) Serial.print(" ");
+
+        // TODO : send HW signal to setPosition
+      }
+    }
+    if (debug) Serial.println();
+    positionreset = true;
+    cyclestarted = false;
+    need_to_log = true;
+    sd_log = true;
+  }
+
+  /*           SERIAL INPUT             */
+
+  if (debug && Serial.available() > 0) {
     int incoming = Serial.read();
     Serial.print("input: ");
     Serial.print(incoming);
@@ -194,14 +315,121 @@ void loop() {
     Serial.write(incoming);
     Serial.println();
 
+    if (incoming > 47 && incoming < 54) {
+      // input is one of 0-5
+      // subtract 49 because the ascii code for 1 is 49
+      activeletter = incoming - 48;
+      if (debug) Serial.print("new active letter: ");
+      if (debug) Serial.println(activeletter);
+    }
+
     switch(incoming) {
+    case 67: // C
+      command = "calibrate1";
+      break;
+    case 99: // c
+      command = "calibrate2";
+      break;
+    case 32: // space
+      command = "shutoff";
+      break;
+    case 104: // h
+      command = "softstop";
+      break;
+    case 112: // p
+      command = "powertoggle";
+      break;
+    case 120: // x
+      command = "cycle";
+      break;
     case 113: // q
       hwsend('q', 0, 0);
       break;
+    case 81: // Q
+      force_log = true;
+      log_position();
+      break;
     case 109: // m
-      hwsend('m', Serial.parseInt(), Serial.parseInt());
+      {
+        int m = Serial.parseInt();
+        int tgt = Serial.parseInt();
+        if (m < 4) absolutemove(m, tgt); // motor is on this teensy
+        else hwsend('m', m, tgt); // send to 2nd teensy
+        break;
+      }
+    case 119: // w
+      {
+        int m = Serial.parseInt();
+        int pos = Serial.parseInt();
+        (m < 4) ? overwriteposition(m, pos) : hwsend('w', m-4, pos);
+        break;
+      }
+    case 87: // W
+      {
+        if (debug) Serial.println("reset all to zero:");
+        for(int i = 0; i < 6; i++) {
+          (i < 4) ? overwriteposition(i, 0) : hwsend('w', i-4, 0);
+        }
+        break;
+      }
     }
   }
+
+  /*             COMMANDS           */
+
+  if (command == "calibrate1") {
+    // calibrate1(activeletter);
+  }
+  else if (command == "calibrate2") {
+    // calibrate2(activeletter);
+  }
+  else if (command == "softstop") {
+    if (debug) Serial.println("soft stopping...");
+    for (int i = 0; i < 4; i++) {
+      master_controllers[i]->stop();
+    }
+    if (debug) Serial.print("final positions: ");
+    for (int i = 0; i < 6; i++) {
+      if (debug) Serial.print(master_steppers[i]->getPosition());
+      if (debug) Serial.print("\t");
+    }
+    if (debug) Serial.println();
+    force_log = true;
+    log_position();
+
+  }
+
+  else if (command == "powertoggle") {
+    powertoggle = !powertoggle;
+    for (int i = 0; i < 6; i++) {
+      digitalWrite(lpins[i][2], powertoggle);
+    }
+    if (debug) Serial.print("power toggled. enable pins ");
+    if (debug) Serial.println((powertoggle) ? "ON" : "OFF");
+  }
+
+  else if (command == "shutoff") {
+    if (debug) Serial.print("POWER SHUTOFF! checking again in ");
+
+    for (int i = 0; i < 6; i++) {
+      digitalWrite(lpins[i][2], LOW);
+    }
+    for (int i = 0; i < 4; i++) {
+      master_controllers[i]->emergencyStop();
+    }    powertoggle = false;
+    for (int i = 3; i > 0; i--) {
+      if (debug) Serial.print(i);
+      if (debug) Serial.print("... ");
+      delay(1000);
+    }
+    if (debug) Serial.println();
+  }
+
+  else if (command == "cycle") {
+    if (debug) Serial.println("starting cycle!");
+    // startnewcycle();
+  }
+  command = "";
 
   recvWithStartEndMarkers();
     if (newData == true) {
