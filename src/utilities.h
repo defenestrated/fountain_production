@@ -17,7 +17,8 @@ extern Stepper *master_steppers[4];
 extern Stepper *slave_steppers[2];
 extern File logfile;
 
-extern const unsigned int indicator, // light
+extern const unsigned int
+indicator, // light
   estop, // input from the e-stop.
   microsteps,
   log_time, // in ms, how often to report postitions.
@@ -30,7 +31,8 @@ extern long avg_sens_widths[6];
 extern int activeletter; // for testing purposes
 extern String command; // logical control
 
-extern long whole_revs[6],
+extern long
+whole_revs[6],
   positions[6],
   prev_positions[6],
   targets[6]; // to compare with positions[]// real build, measured manually
@@ -39,7 +41,8 @@ extern const int revolutions[6]; // number of times to revolve per cycle
 extern int
   period, // time in seconds for one cycle
   certainties[6],
-  speeds[6];
+  speeds[6],
+  lpins[][5];
 extern boolean
 is_primary,
   debug,  // flag to turn on/off serial output
@@ -51,7 +54,8 @@ is_primary,
   need_to_log,
   SDokay,
   force_log,
-  log_pos, sd_log, already_written; // flags to note whether we've logged positions during moves
+  log_pos, sd_log, already_written,
+  slave_has_queried; // flags to note whether we've logged positions during moves
 
 extern boolean flips[6];
 extern float thetas[6];

@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <TeensyStep.h>
 #include "utilities.h"
+#include "calibrate1.h"
 
 #define HWSERIAL Serial1
 
@@ -14,26 +15,32 @@ int max_speed =10000, // top speed
 
 String command = ""; // logical control
 
-long positions[] = {0, 0};
-long prev_positions[] = {0, 0};
-long targets[6]; // to compare with positions[]
+long positions[] = {0, 0},
+  prev_positions[] = {0, 0},
+  avg_sens_widths[6],
+  whole_revs[6],
+  targets[6]; // to compare with positions[]
+
+float thetas[6];
+int certainties[6];
 
 int speeds[] = { 1830, 1890 }; // calculated speeds per ring.
 
 /* TEENSY */
-int lpins[][3] = {
+int lpins[][5] = {
   // letter pins. two dimensional array of [letters][pins].
   // this one has no sensors (those are all on the primary board)
 
   // 0      1   2
-  // step, dir, en
-  {2, 3, 4}, // 0: L
-  {5, 6, 7}, // 1: E
+  // step, dir, en, s1, nothing
+  {2, 3, 4, 33, 0}, // 0: L
+  {5, 6, 7, 34, 0}, // 1: E
 };
 
 boolean debug = true,
   shouldexport = true,
   need_to_log = true,
+  slave_has_queried = false,
   sd_log = true;  // flag to turn on/off serial output
 
 StepControl *master_controllers[4] = {NULL, NULL, NULL, NULL};
@@ -100,6 +107,34 @@ void dealwithit() {
 
     absolutemove(HWint1, HWint2);
   }
+
+  else if (strcmp(HWmsg, "O") == 0) {
+    if (debug) Serial.print("setting whole_revs: ");
+    whole_revs[0] = HWint1;
+    whole_revs[1] = HWint2;
+    if (debug) Serial.print(whole_revs[0]);
+    if (debug) Serial.print(", ");
+    if (debug) Serial.println(whole_revs[1]);
+  }
+
+  else if (strcmp(HWmsg, "I") == 0) {
+    if (debug) Serial.print("setting avg_sens_widths: ");
+    avg_sens_widths[0] = HWint1;
+    avg_sens_widths[1] = HWint2;
+    if (debug) Serial.print(avg_sens_widths[0]);
+    if (debug) Serial.print(", ");
+    if (debug) Serial.println(avg_sens_widths[1]);
+  }
+
+  else if (strcmp(HWmsg, "U") == 0) {
+    if (debug) Serial.print("setting speeds: ");
+    speeds[0] = HWint1;
+    speeds[1] = HWint2;
+    if (debug) Serial.print(speeds[0]);
+    if (debug) Serial.print(", ");
+    if (debug) Serial.println(speeds[1]);
+  }
+
   else if (strcmp(HWmsg, "s") == 0) {
     speeds[HWint1] = HWint2;
     slave_steppers[HWint1]->setMaxSpeed(HWint2);
@@ -119,6 +154,12 @@ void dealwithit() {
   }
   else if (strcmp(HWmsg, "w") == 0) {
     overwriteposition(HWint1, HWint2);
+  }
+
+  else if (strcmp(HWmsg, "C") == 0) {
+    // green light for calibration
+    if (debug) Serial.println("calibration green light received.");
+    calibrate1_finish(HWint1);
   }
 }
 

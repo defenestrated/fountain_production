@@ -108,6 +108,7 @@ void dealwithit() {
   }
 
   if (strcmp(HWmsg, "a") == 0) {
+    // answer from secondary re: position of specific motor
     positions[HWint1 + 4] = HWint2;
     // need_to_log = true;
     // sd_log = true;
@@ -119,6 +120,13 @@ void dealwithit() {
       if (debug) Serial.print(" ");
     }
     if (debug) Serial.println();
+  }
+  else if (strcmp(HWmsg, "C") == 0) {
+    // query from slave; send positions, then calibration greenlight
+    if (debug) Serial.print("calibration request for slave letter ");
+if (debug) Serial.println(HWint1);
+     hwsend('w', HWint1, positions[HWint1 + 4]);
+     hwsend('C', HWint1, 0); // green light signal for calibration
   }
 }
 
@@ -180,6 +188,12 @@ void setup() {
     Serial.println();
 
   }
+
+  while(!HWSERIAL && millis() < 4000);
+
+  hwsend('O', whole_revs[4], whole_revs[5]); // send whole_rev measurements
+  hwsend('I', avg_sens_widths[4], avg_sens_widths[5]); // send sensor widths
+  hwsend('U', speeds[4], speeds[5]); // send speeds
 
 
   // sd init
