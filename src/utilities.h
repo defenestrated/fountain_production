@@ -20,7 +20,8 @@ extern File logfile;
 extern const unsigned int
 indicator, // light
   estop, // input from the e-stop.
-  microsteps,
+  mockup_microsteps,
+  build_microsteps,
   log_time, // in ms, how often to report postitions.
   sd_write_time, // defines SD read/write operations, so don't make this too small
   motor_steps_per_rev; // how many steps per one motor revolution
@@ -39,11 +40,13 @@ whole_revs[6],
 extern const long offsets[6]; // distance from sensor 0 to home position
 extern const int revolutions[6]; // number of times to revolve per cycle
 extern int
-  period, // time in seconds for one cycle
+mockup_period, // time in seconds for one cycle
+  build_period,
   certainties[6],
   speeds[6],
+  accelerations[6],
   lpins[][5];
-extern boolean
+extern bool
 is_primary,
   debug,  // flag to turn on/off serial output
   searching,
@@ -57,7 +60,7 @@ is_primary,
   log_pos, sd_log, already_written,
   slave_has_queried; // flags to note whether we've logged positions during moves
 
-extern boolean flips[6];
+extern bool mockup_flips[6], build_flips[6];
 extern float thetas[6];
 
 extern const byte numChars;
@@ -67,7 +70,7 @@ extern char HWmsg[32]; // parsed msg
 extern int HWint1; // parsed int
 extern int HWint2; // parsed int
 
-extern boolean newData;
+extern bool newData;
 
 
 
@@ -75,9 +78,9 @@ extern boolean newData;
 
 // ---------------  utility functions: ---------------
 
+int aprintf(char const * str, ...);
 void hwsend(char c, int i, int j);
-
-boolean sense(int pin);
+bool sense(int pin);
 void log_position();
 void meta_calibrate(int letter);
 time_t getTeensy3Time();
@@ -101,6 +104,8 @@ void recvWithStartEndMarkers();
 void parseData();
 time_t getTeensy3Time();
 void printDigits(int digits);
+
+void home(int letter);
 
 
 

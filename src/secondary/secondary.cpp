@@ -5,13 +5,14 @@
 
 #define HWSERIAL Serial1
 
+bool debug = true;
+
 bool is_primary = false;
 
 const unsigned int indicator = LED_BUILTIN, // light
   microsteps = 16,
   export_interval = 250;
-int max_speed =10000, // top speed
-  acceleration = 6000;  // acceleration = steps/sec/sec;
+int acceleration = 6000;  // acceleration = steps/sec/sec;
 
 String command = ""; // logical control
 
@@ -24,7 +25,8 @@ long positions[] = {0, 0},
 float thetas[6];
 int certainties[6];
 
-int speeds[] = { 1830, 1890 }; // calculated speeds per ring.
+int speeds[] = { 1830, 1890 },
+  accelerations[6]; // calculated speeds per ring.
 
 /* TEENSY */
 int lpins[][5] = {
@@ -33,11 +35,11 @@ int lpins[][5] = {
 
   // 0      1   2
   // step, dir, en, s1, nothing
-  {2, 3, 4, 33, 0}, // 0: L
-  {5, 6, 7, 34, 0}, // 1: E
+  {2, 3, 4, 22, 0}, // 0: L
+  {5, 6, 7, 23, 0}, // 1: E
 };
 
-boolean debug = true,
+bool
   shouldexport = true,
   need_to_log = true,
   slave_has_queried = false,
@@ -58,7 +60,16 @@ char HWmsg[numChars] = {0};
 int HWint1 = 0;
 int HWint2 = 0;
 
-boolean newData = false;
+bool ready = false;
+const int readycount = 5;
+bool checklist[] = {
+  false, // 0 whole revolution distance
+  false, // 1 sensor widths
+  false, // 2 speeds
+  false, // 3 positions
+  false  // 4 accelerations
+};
+bool newData = false;
 
 
 //============
@@ -80,15 +91,21 @@ void export_position() {
   if (millis() % export_interval > export_interval * 2/3) shouldexport = true;
 }
 
-void dealwithit() {
-  if (debug) {
-    /* Serial.print("c: "); */
-    /* Serial.println(HWmsg); */
-    /* Serial.print("i1: "); */
-    /* Serial.println(HWint1); */
-    /* Serial.print("i2: "); */
-    /* Serial.println(HWint2); */
+void preflight(int which, int status) {
+  int readysum = 0;
+  checklist[which] = status;
+  if (debug) Serial.print("ready states: ");
+  for (int i = 0; i < readycount; i++) {
+    if (debug) Serial.print(checklist[i]);
+    readysum += checklist[i];
   }
+  if (readysum == readycount) ready = true;
+  else ready = false;
+  if (debug) Serial.println();
+}
+
+void dealwithit() {
+
   if (strcmp(HWmsg, "q") == 0) {
     // query from primary
 
@@ -115,7 +132,8 @@ void dealwithit() {
     if (debug) Serial.print(whole_revs[0]);
     if (debug) Serial.print(", ");
     if (debug) Serial.println(whole_revs[1]);
-  }
+    preflight(0, 1);
+  } // whole rev set
 
   else if (strcmp(HWmsg, "I") == 0) {
     if (debug) Serial.print("setting avg_sens_widths: ");
@@ -124,7 +142,8 @@ void dealwithit() {
     if (debug) Serial.print(avg_sens_widths[0]);
     if (debug) Serial.print(", ");
     if (debug) Serial.println(avg_sens_widths[1]);
-  }
+    preflight(1, 1);
+  } // sensor width set
 
   else if (strcmp(HWmsg, "U") == 0) {
     if (debug) Serial.print("setting speeds: ");
@@ -133,7 +152,31 @@ void dealwithit() {
     if (debug) Serial.print(speeds[0]);
     if (debug) Serial.print(", ");
     if (debug) Serial.println(speeds[1]);
-  }
+    slave_steppers[0]->setMaxSpeed(speeds[0]);
+    slave_steppers[1]->setMaxSpeed(speeds[1]);
+    preflight(2, 1);
+    // change to be one-off calls for speeds + accel
+  } // speed set
+
+  else if (strcmp(HWmsg, "P") == 0) {
+    if (debug) Serial.println("setting positions: ");
+    overwriteposition(0, HWint1);
+    overwriteposition(1, HWint2);
+    preflight(3, 1);
+  } // positions set
+
+  else if (strcmp(HWmsg, "Y") == 0) {
+    if (debug) Serial.print("setting accelerations: ");
+    accelerations[0] = HWint1;
+    accelerations[1] = HWint2;
+    slave_steppers[0]->setAcceleration(accelerations[0]);
+    slave_steppers[1]->setAcceleration(accelerations[1]);
+
+    if (debug) Serial.print(accelerations[0]);
+    if (debug) Serial.print(", ");
+    if (debug) Serial.println(accelerations[1]);
+    preflight(4, 1);
+  } // accelerations set
 
   else if (strcmp(HWmsg, "s") == 0) {
     speeds[HWint1] = HWint2;
@@ -154,6 +197,10 @@ void dealwithit() {
   }
   else if (strcmp(HWmsg, "w") == 0) {
     overwriteposition(HWint1, HWint2);
+  }
+
+  else if (strcmp(HWmsg, "c") == 0) {
+    calibrate1(HWint1);
   }
 
   else if (strcmp(HWmsg, "C") == 0) {
@@ -182,29 +229,38 @@ void setup() {
   }
 
   // initiate steppers
+  if (debug) Serial.print("initializing steppers... ");
   for (int i = 0; i < 2; i++) {
-    if (debug) Serial.println("initializing steppers");
+    if (debug) aprintf("%d(%d, %d) ", i, lpins[i][0], lpins[i][1]);
     slave_steppers[i] = new Stepper(lpins[i][0], lpins[i][1]); // step and dir/
-    slave_steppers[i]->setMaxSpeed(speeds[i]);
-    slave_steppers[i]->setAcceleration(acceleration);
-    slave_steppers[i]->setPosition(positions[i]);
   }
+  if (debug) Serial.println();
 
   // pin declarations
   for (int s = 0; s < 2; s++) {
     if (debug) Serial.print("== letter ");
     if (debug) Serial.print(s);
     if (debug) Serial.println(" ==");
-    for (int p = 0; p < 3; p++) {
-      if (debug) Serial.print("setting pin to output: ");
-      if (debug) Serial.println(lpins[s][p]);
-      pinMode(lpins[s][p], OUTPUT);
+    for (int p = 0; p < 5; p++) {
+      if (lpins[s][p] != 0) {
+        if (p < 3) {
+          if (debug) Serial.print("setting pin to output: ");
+          if (debug) Serial.println(lpins[s][p]);
+          pinMode(lpins[s][p], OUTPUT);
+        }
+        else {
+          if (debug) Serial.print("setting pin to input_pullup: ");
+          if (debug) Serial.println(lpins[s][p]);
+          pinMode(lpins[s][p], INPUT_PULLUP);
+        }
+      }
     }
-
     digitalWrite(lpins[s][2], HIGH); // enable all motors
   }
 
   pinMode(indicator, OUTPUT);
+  if (!ready) hwsend('g', 0, 0); // ask for setup info
+
 }
 
 void loop() {

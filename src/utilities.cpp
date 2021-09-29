@@ -9,6 +9,46 @@
 
 #define HWSERIAL Serial1
 
+int aprintf(char const * str, ...) {
+  // from https://gist.github.com/EleotleCram/eb586037e2976a8d9884
+	int i, j, count = 0;
+
+	va_list argv;
+	va_start(argv, str);
+	for(i = 0, j = 0; str[i] != '\0'; i++) {
+		if (str[i] == '%') {
+			count++;
+
+			Serial.write(reinterpret_cast<const uint8_t*>(str+j), i-j);
+
+			switch (str[++i]) {
+				case 'd': Serial.print(va_arg(argv, int));
+					break;
+				case 'l': Serial.print(va_arg(argv, long));
+					break;
+				case 'f': Serial.print(va_arg(argv, double));
+					break;
+				case 'c': Serial.print((char) va_arg(argv, int));
+					break;
+				case 's': Serial.print(va_arg(argv, char *));
+					break;
+				case '%': Serial.print("%");
+					break;
+				default:;
+			};
+
+			j = i+1;
+		}
+	};
+	va_end(argv);
+
+	if(i > j) {
+		Serial.write(reinterpret_cast<const uint8_t*>(str+j), i-j);
+	}
+
+	return count;
+}
+
 void hwsend(char c, int i, int j){
   /* Serial.println("sending:"); */
   /* Serial.print("<"); */
@@ -232,4 +272,30 @@ void overwriteposition(int m, long pos) {
   }
 
 
+}
+
+void home(int letter) {
+  if (!is_primary) letter -= 4; // shift down if we're on the secondary board
+
+  int mod = positions[letter] % whole_revs[letter];
+  /* int fromzero = (mod > whole_revs[letter]/2) ? mod - whole_revs[letter] : mod; */
+
+  int target = (mod > whole_revs[letter]/2) ? whole_revs[letter] : 0; // either go to full rev or 0, whichever's closer
+
+  if (is_primary) {
+    // primary movement.
+    master_steppers[letter]->setTargetAbs(target);
+    master_controllers[letter]->move(*master_steppers[letter]);
+    master_steppers[letter]->setPosition(0);
+  }
+
+  else {
+    // secondary movement, this one's easy:
+    slave_steppers[letter]->setTargetAbs(target);
+    slave_controllers[letter]->move(*slave_steppers[letter]);
+  }
+  need_to_log = true;
+  sd_log = true;
+
+  if (debug) aprintf("motor %d reset to 0\n", letter);
 }

@@ -7,7 +7,7 @@
 #include "calibrate1.h"
 
 int dir, c1, s1, p1;
-long target, ss, se, dist, position;
+long target, ss, se, dist;
 boolean started;
 
 void calibrate1_start(int letter) {
@@ -27,7 +27,7 @@ void calibrate1_finish(int letter) {
   dir = 1;
   c1 = sense(lpins[letter][3]);
   p1 = sense(lpins[letter][3]);
-  s1; // sensor state
+  s1 = c1; // sensor state
   ss = 0; se = 0; // sensor start + sensor end
 
   int mod = positions[letter] % whole_revs[letter];
@@ -66,8 +66,10 @@ void calibrate1_finish(int letter) {
     while (slave_controllers[letter]->isRunning()) {
 
       c1 = sense(lpins[letter][3]);
+      if (millis() % 100 < 10 && debug) Serial.println(c1);
 
       if (c1 != p1) { // state change
+        if (debug) Serial.println("state change");
 
         if (c1 && !p1) { // leading edge
           started = true; // flag to avoid half-readings if we start on a sensor
@@ -135,5 +137,7 @@ void calibrate1_finish(int letter) {
     need_to_log = true;
     sd_log = true;
   }
+
+  home(letter);
 
 } // end test_calibrate
