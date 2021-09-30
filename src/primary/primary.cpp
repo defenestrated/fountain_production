@@ -27,12 +27,12 @@ const unsigned int indicator = LED_BUILTIN, // light
   log_time = 250, // in ms, how often to report postitions.
   sd_write_time = 1000, // defines SD read/write operations, so don't make this too small
   motor_steps_per_rev = 400; // how many steps per one motor revolution
-int acceleration = 2;  // acceleration. divisor; each will be set to speeds[i] * microsteps / acceleration
+float acceleration = 0.5;  // acceleration. multiplier; each will be set to speeds[i] * acceleration
 
 long avg_sens_widths[]; // rough number of steps it takes to traverse a sensor
 
 int activeletter = 4; // for testing purposes
-String command = ""; // logical control
+const char* command = ""; // logical control
 
 const long mockup_revs[] = { 4572, 9440, 2229, 6983, 400, 5082 }, // measured manually on the mockup
   build_revs[] = { 29128, 60082, 14060, 44378, 1091, 29880 }, // real build
@@ -42,7 +42,6 @@ const long mockup_revs[] = { 4572, 9440, 2229, 6983, 400, 5082 }, // measured ma
   mockup_speeds[] = { 1942, 2003, 1875, 1972, 33, 1992 },
   build_speeds[] = { 1830, 1890, 1782, 1854, 54, 2022 }
 ;
-const int revolutions[] = {6, 3, 12, 4, 2, 6}; // number of times to revolve per cycle
 
 long whole_revs[6],
  positions[6],
@@ -58,7 +57,7 @@ int mockup_period = 30,
 int certainties[] = { 0, 0, 0, 0, 0, 0 };
 bool searching = false;
 bool build_flips[] = {false, true, true, false, false, false}, // real build
-  mockup_flips[] = {false, true, true, true, false, false}; // real build
+  mockup_flips[] = {false, false, true, true, false, false}; // real build
 float thetas[6];
 
 const unsigned int txtransfergap = 50;
@@ -80,8 +79,8 @@ int lpins[][5] = { // letter pins. two dimensional array of [letters][pins].
 
 bool
   powertoggle = true, // indicator as to whether we've disabled the motors or not
-  cyclestarted = false,
-  positionreset = false,
+  // cyclestarted = false,
+  // positionreset = false,
   need_to_log = true,
   SDokay = true,
   force_log = false,
@@ -107,11 +106,12 @@ bool newData = false;
 
 void secondary_setup() {
   if (debug) Serial.println("sending lengths + speeds");
-  hwsend('O', whole_revs[4], whole_revs[5]); // send whole_rev measurements
+  hwsend('!', 0, 0);
   hwsend('I', avg_sens_widths[4], avg_sens_widths[5]); // send sensor widths
   hwsend('U', speeds[4], speeds[5]); // send speeds
   hwsend('P', positions[4], positions[5]); // send positions
   hwsend('Y', accelerations[4], accelerations[5]); // send accelerations
+  hwsend('O', whole_revs[4], whole_revs[5]); // send whole_rev measurements
 }
 
 void dealwithit() {
@@ -212,6 +212,7 @@ void setup() {
   }
 
   // calculate speeds, accel, + sensor widths (use gsheet)
+  if (debug) Serial.print("speeds / accelerations: ");
   for (int i = 0; i < 6; i++) {
     if (mockup) {
       whole_revs[i] = mockup_revs[i] * mockup_microsteps;
@@ -228,8 +229,7 @@ void setup() {
     }
     accelerations[i] = speeds[i] * acceleration;
 
-    if (debug) aprintf("[%d/%d, %d] ",
-                       (mockup) ? mockup_speeds[i] * mockup_microsteps : build_speeds[i] * build_microsteps,
+    if (debug) aprintf("[%d/%d] ",
                        speeds[i],
                        accelerations[i]);
 
@@ -239,27 +239,18 @@ void setup() {
       master_steppers[i]->setPosition(positions[i]);
     }
   }
-  if (debug) aprintf("\n");
+  if (debug) Serial.println();
 
   secondary_setup();
 
   // pin declarations
   for (int s = 0; s < 6; s++) {
-    if (debug) Serial.print("== letter ");
-    if (debug) Serial.print(s);
-    if (debug) Serial.println(" ==");
+    if (debug) aprintf("letter %d: output: s:%d, d:%d, e:%d  |  input_pullup: s1:%d, s2: %d\n",
+                   s, lpins[s][0], lpins[s][1], lpins[s][2], lpins[s][3], lpins[s][4] );
     for (int p = 0; p < 5; p++) {
       if (lpins[s][p] != 0) {
-        if (p < 3 && s < 4) {
-          if (debug) Serial.print("setting pin to output: ");
-          if (debug) Serial.println(lpins[s][p]);
-          pinMode(lpins[s][p], OUTPUT);
-        }
-        else {
-          if (debug) Serial.print("setting pin to input_pullup: ");
-          if (debug) Serial.println(lpins[s][p]);
-          pinMode(lpins[s][p], INPUT_PULLUP);
-        }
+        if (p < 3 && s < 4) pinMode(lpins[s][p], OUTPUT);
+        else if (p >= 3 && s < 4) pinMode(lpins[s][p], INPUT_PULLUP);
       }
     }
 
@@ -269,14 +260,23 @@ void setup() {
   pinMode(indicator, OUTPUT);
   pinMode(estop, INPUT);
 
-  if (debug) Serial.println("---------");
-  if (debug) Serial.print("estop status: ");
-  if (debug) Serial.println((digitalRead(estop) == HIGH) ? "high" : "low");
+  if (debug) aprintf("-----------\nestop status: %s\n-----------\n",
+                     (digitalRead(estop) == HIGH) ? "high / ok to run" : "low / stopped");
 
   while (digitalRead(estop) == LOW) {
     if (debug) Serial.println("estop active. doing nothing.");
     delay(1000);
   } // hang until estop is reset
+
+
+  int possum;
+  for (int i = 0; i < 6; i++) {
+    if (positions[i] != 0 || whole_revs[i] % positions[i] != 0) possum++;
+    else {
+      overwriteposition((i < 4) ? i : i-4, 0);
+      // positionreset = true;
+    }
+  }
 
   /* if (debug) Serial.println("waiting 3secs at end of setup, just... in case."); */
   /* for(int i = 3; i > 0; i--) { */
@@ -290,8 +290,19 @@ void setup() {
 }
 
 void loop() {
+  recvWithStartEndMarkers();
+  if (newData == true) {
+    strcpy(tempChars, receivedChars);
+    // this temporary copy is necessary to protect the original data
+    //   because strtok() used in parseData() replaces the commas with \0
+    parseData();
+    dealwithit();
+    newData = false;
+  }
 
   if (digitalRead(estop) == LOW) command = "shutoff";
+
+  // query other board for positions:
   for (int i = 0; i < 6; i++) {
     if (i < 4) positions[i] = master_steppers[i]->getPosition();
     else {
@@ -303,9 +314,7 @@ void loop() {
     }
   }
 
-  log_position();
-
-  if (cyclestarted && !need_to_log && !positionreset) { // i.e. not moving, but started a cycle
+  if (cyclestarted && !need_to_log && positionreset) { // i.e. not moving, but started a cycle
 
     if (debug) Serial.println("RESETTING POSITIONS");
     for(int i=0; i<6; i++){
@@ -315,12 +324,11 @@ void loop() {
       if (i < 4) { master_steppers[i]->setPosition(positions[i]);
         if (debug) Serial.print(master_steppers[i]->getPosition());
         if (debug) Serial.print(" ");
-
-        // TODO : send HW signal to setPosition
       }
+      hwsend('w', i, positions[i]);
     }
     if (debug) Serial.println();
-    positionreset = true;
+    positionreset = false;
     cyclestarted = false;
     // need_to_log = true;
     // sd_log = true;
@@ -345,9 +353,6 @@ void loop() {
     }
 
     switch(incoming) {
-    case 67: // C
-      command = "calibrate1";
-      break;
     case 99: // c
       {
         // command = "calibrate2";
@@ -369,6 +374,16 @@ void loop() {
       break;
     case 120: // x
       command = "cycle";
+      break;
+    case 88: // X
+      customcycle(
+                  Serial.parseFloat(),
+                  Serial.parseFloat(),
+                  Serial.parseFloat(),
+                  Serial.parseFloat(),
+                  Serial.parseFloat(),
+                  Serial.parseFloat()
+                  );
       break;
     case 113: // q
       SD_read_positions();
@@ -405,33 +420,29 @@ void loop() {
         break;
       }
     }
+
+    if (debug) aprintf("new command: %s\n", command);
   }
 
   /*             COMMANDS           */
 
-  if (command == "calibrate1") {
-    // calibrate1(activeletter);
-  }
-  else if (command == "calibrate2") {
-    // calibrate2(activeletter);
-  }
-  else if (command == "softstop") {
+  if (strcmp(command, "softstop") == 0) {
     if (debug) Serial.println("soft stopping...");
+    hwsend('h', 0, 0);
     for (int i = 0; i < 4; i++) {
-      master_controllers[i]->stop();
+      master_controllers[i]->stopAsync();
     }
     if (debug) Serial.print("final positions: ");
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 4; i++) {
       if (debug) Serial.print(master_steppers[i]->getPosition());
       if (debug) Serial.print("\t");
     }
     if (debug) Serial.println();
     force_log = true;
     log_position();
-
   }
 
-  else if (command == "powertoggle") {
+  else if (strcmp(command, "powertoggle") == 0) {
     powertoggle = !powertoggle;
     for (int i = 0; i < 6; i++) {
       digitalWrite(lpins[i][2], powertoggle);
@@ -440,7 +451,7 @@ void loop() {
     if (debug) Serial.println((powertoggle) ? "ON" : "OFF");
   }
 
-  else if (command == "shutoff") {
+  else if (strcmp(command, "shutoff") == 0) {
     if (debug) Serial.print("POWER SHUTOFF! checking again in ");
 
     for (int i = 0; i < 6; i++) {
@@ -457,21 +468,10 @@ void loop() {
     if (debug) Serial.println();
   }
 
-  else if (command == "cycle") {
-    if (debug) Serial.println("starting cycle!");
-    // startnewcycle();
+  else if (strcmp(command, "cycle") == 0) {
+    startnewcycle();
   }
   command = "";
 
-  recvWithStartEndMarkers();
-    if (newData == true) {
-        strcpy(tempChars, receivedChars);
-            // this temporary copy is necessary to protect the original data
-            //   because strtok() used in parseData() replaces the commas with \0
-        parseData();
-        dealwithit();
-        newData = false;
-    }
-
-
+  log_position();
 }

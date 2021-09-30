@@ -12,9 +12,9 @@ bool is_primary = false;
 const unsigned int indicator = LED_BUILTIN, // light
   microsteps = 16,
   export_interval = 250;
-int acceleration = 6000;  // acceleration = steps/sec/sec;
+// /* int */ acceleration = 6000;  // acceleration = steps/sec/sec;
 
-String command = ""; // logical control
+const char* command = ""; // logical control
 
 long positions[] = {0, 0},
   prev_positions[] = {0, 0},
@@ -45,7 +45,7 @@ bool
   slave_has_queried = false,
   sd_log = true;  // flag to turn on/off serial output
 
-StepControl *master_controllers[4] = {NULL, NULL, NULL, NULL};
+StepControl *master_controllers[4] = { NULL, NULL, NULL, NULL };
 StepControl *slave_controllers[2] = { NULL, NULL }; // controller objects -- one per stepper, to avoid Bresenham.
 
 Stepper *master_steppers[4] = { NULL, NULL, NULL, NULL };
@@ -75,6 +75,9 @@ bool newData = false;
 //============
 
 void export_position() {
+  positions[0] = slave_steppers[0]->getPosition();
+  positions[1] = slave_steppers[1]->getPosition();
+
   if (millis() % export_interval < export_interval/3 && shouldexport) {
     shouldexport = false;
 
@@ -114,15 +117,24 @@ void dealwithit() {
     export_position();
   }
 
-  else if (strcmp(HWmsg, "m") == 0) {
-    if (debug) {
-      Serial.print("moving ");
-      Serial.print(HWint1);
-      Serial.print(" to ");
-      Serial.println(HWint2);
+  else if (strcmp(HWmsg, "!") == 0) {
+    ready = false;
+    for (int i = 0; i < 5; i++) {
+      preflight(i,0);
     }
+  }
 
+  else if (strcmp(HWmsg, "m") == 0) {
+    if (debug) aprintf("moving %d to %d\n", HWint1, HWint2);
     absolutemove(HWint1, HWint2);
+  }
+
+  else if (strcmp(HWmsg, "h") == 0) {
+    if (debug) Serial.println("soft stop");
+    for (int i = 0; i < 2; i++) {
+      slave_controllers[i]->stopAsync();
+    }
+    shouldexport = true;
   }
 
   else if (strcmp(HWmsg, "O") == 0) {
@@ -188,7 +200,7 @@ void dealwithit() {
     if (debug) Serial.println(HWint2);
   }
   else if (strcmp(HWmsg, "a") == 0) {
-    acceleration = HWint2;
+    accelerations[HWint1] = HWint2;
     slave_steppers[HWint1]->setAcceleration(HWint2);
     if (debug) Serial.print("motor ");
     if (debug) Serial.print(HWint1);
@@ -208,9 +220,16 @@ void dealwithit() {
     if (debug) Serial.println("calibration green light received.");
     calibrate1_finish(HWint1);
   }
+
+  else if (strcmp(HWmsg, "x") == 0) {
+    // start full cycle
+    if (debug) aprintf("starting cycle! targets: %d, %d\n", HWint1, HWint2);
+    syncmove(HWint1, HWint2);
+  }
 }
 
 void setup() {
+  ready = false;
   HWSERIAL.begin(115200);
 
   // initial logging
@@ -220,7 +239,7 @@ void setup() {
     while(!Serial && millis() < 4000);
     Serial.println("=================== secondary setup =====================");
     Serial.println("source file: " __FILE__ " " __DATE__ " " __TIME__);
-    Serial.println("=======================================================");
+    Serial.println("=========================================================");
   }
 
   // initiate controllers
@@ -237,24 +256,21 @@ void setup() {
   if (debug) Serial.println();
 
   // pin declarations
+
+  if (debug) Serial.println("-- pin setup --");
   for (int s = 0; s < 2; s++) {
-    if (debug) Serial.print("== letter ");
-    if (debug) Serial.print(s);
-    if (debug) Serial.println(" ==");
+    if (debug) aprintf("letter %d: output: s:%d, d:%d, e:%d  |  input_pullup: s1:%d\n",
+                       s, lpins[s][0], lpins[s][1], lpins[s][2], lpins[s][3] );
+
     for (int p = 0; p < 5; p++) {
       if (lpins[s][p] != 0) {
-        if (p < 3) {
-          if (debug) Serial.print("setting pin to output: ");
-          if (debug) Serial.println(lpins[s][p]);
-          pinMode(lpins[s][p], OUTPUT);
-        }
-        else {
-          if (debug) Serial.print("setting pin to input_pullup: ");
-          if (debug) Serial.println(lpins[s][p]);
-          pinMode(lpins[s][p], INPUT_PULLUP);
-        }
+        if (p < 3) pinMode(lpins[s][p], OUTPUT);
+        else pinMode(lpins[s][p], INPUT_PULLUP);
       }
     }
+
+
+
     digitalWrite(lpins[s][2], HIGH); // enable all motors
   }
 
@@ -264,11 +280,6 @@ void setup() {
 }
 
 void loop() {
-  positions[0] = slave_steppers[0]->getPosition();
-  positions[1] = slave_steppers[1]->getPosition();
-
-  export_position();
-
   recvWithStartEndMarkers();
   if (newData == true) {
     strcpy(tempChars, receivedChars);
@@ -279,5 +290,5 @@ void loop() {
     newData = false;
   }
 
-
+  export_position();
 }

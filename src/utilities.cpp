@@ -9,6 +9,9 @@
 
 #define HWSERIAL Serial1
 
+const int revolutions[] = {6, 3, 12, 4, 2, 6}; // number of times to revolve per cycle
+bool cyclestarted = false, positionreset = false;
+
 int aprintf(char const * str, ...) {
   // from https://gist.github.com/EleotleCram/eb586037e2976a8d9884
 	int i, j, count = 0;
@@ -50,15 +53,7 @@ int aprintf(char const * str, ...) {
 }
 
 void hwsend(char c, int i, int j){
-  /* Serial.println("sending:"); */
-  /* Serial.print("<"); */
-  /* Serial.print(c); */
-  /* Serial.print(", "); */
-  /* Serial.print(i); */
-  /* Serial.print(", "); */
-  /* Serial.print(j); */
-  /* Serial.print(">"); */
-  /* Serial.println(); */
+  if (debug && c != 'q' && c != 'a') aprintf("sending <%c, %d, %d>\n", c, i, j);
   HWSERIAL.print("<");
   HWSERIAL.print(c);
   HWSERIAL.print(", ");
@@ -98,6 +93,10 @@ void SD_read_positions() {
 }
 
 void log_position() {
+
+  for (int i = 0; i < 4; i++) {
+    positions[i] = master_steppers[i]->getPosition();
+  }
   // logs the position once every so often (interval defined global log_time variable)
   int sum = 0;
 
@@ -217,7 +216,7 @@ void parseData() {
 
 }
 
-void absolutemove(int m, long tgt) { // BROKEN
+void absolutemove(int m, long tgt) {
   if (debug) Serial.print("absolute move: motor ");
   if (debug) Serial.print(m, DEC);
   if (debug) Serial.print(", target: ");
@@ -253,49 +252,101 @@ void printDigits(int digits) {
 }
 
 void overwriteposition(int m, long pos) {
-  if (debug) Serial.print("overwriting motor ");
-  if (debug) Serial.print(m);
-  if (debug) Serial.print(" to ");
-  if (debug) Serial.print(pos);
-  if (debug) Serial.print(". confirmed at: ");
   positions[m] = pos;
 
   if (is_primary) {
     master_steppers[m]->setPosition(pos);
-    if (debug) Serial.println(master_steppers[m]->getPosition());
   }
   else {
     slave_steppers[m]->setPosition(pos);
-    if (debug) Serial.println(slave_steppers[m]->getPosition());
     hwsend('a', m, pos);
     // force the log in primary.cpp, not here (log has to happen on primary teensy)
   }
 
-
+  if (debug) aprintf("overwriting motor %d to %d. confirmed at: %d\n",
+                     m, pos, is_primary ?
+                     master_steppers[m]->getPosition()
+                     : slave_steppers[m]->getPosition());
 }
 
 void home(int letter) {
-  if (!is_primary) letter -= 4; // shift down if we're on the secondary board
 
   int mod = positions[letter] % whole_revs[letter];
   /* int fromzero = (mod > whole_revs[letter]/2) ? mod - whole_revs[letter] : mod; */
-
   int target = (mod > whole_revs[letter]/2) ? whole_revs[letter] : 0; // either go to full rev or 0, whichever's closer
 
-  if (is_primary) {
-    // primary movement.
-    master_steppers[letter]->setTargetAbs(target);
-    master_controllers[letter]->move(*master_steppers[letter]);
-    master_steppers[letter]->setPosition(0);
+  if (debug) aprintf("homing letter %d. position: %d, mod: %d, target: %d\n",
+                     letter, positions[letter], mod, target);
+
+  if (positions[letter] != target) {
+    if (is_primary) {
+      // primary movement.
+
+      master_steppers[letter]->setTargetAbs(target);
+      master_controllers[letter]->move(*master_steppers[letter]);
+      master_steppers[letter]->setPosition(0);
+    }
+
+    else {
+      // secondary movement, this one's easy:
+      slave_steppers[letter]->setTargetAbs(target);
+      slave_controllers[letter]->move(*slave_steppers[letter]);
+      slave_steppers[letter]->setPosition(0);
+    }
   }
 
-  else {
-    // secondary movement, this one's easy:
-    slave_steppers[letter]->setTargetAbs(target);
-    slave_controllers[letter]->move(*slave_steppers[letter]);
-  }
   need_to_log = true;
   sd_log = true;
 
   if (debug) aprintf("motor %d reset to 0\n", letter);
+}
+
+void startnewcycle() {
+
+  cyclestarted = true;
+  positionreset = false;
+  need_to_log = true;
+
+  customcycle(1, 1, 1, 1, 1, 1);
+}
+
+void customcycle(float a, float b, float c, float d, float e, float f) {
+  float fracs[] = {a, b, c, d, e, f};
+  if (debug) Serial.println("custom cycle:");
+  for (int i = 0; i < 6; i++) {
+    targets[i] = whole_revs[i]*revolutions[i]*fracs[i];
+    if (debug) aprintf("[%d]: %d * %f = %d\t",
+                       i, whole_revs[i]*revolutions[i], fracs[i], targets[i]);
+  }
+  if (debug) Serial.println();
+
+  syncmove(targets[0],targets[1],targets[2],targets[3]);
+  hwsend('x', targets[4], targets[5]);
+}
+
+
+void syncmove(long a, long b) {
+  long tgts[] = {a, b};
+  if (debug) Serial.print("secondary sync move: ");
+  for (int i = 0; i < 2; i++) {
+    if (debug) aprintf("[%d]: %d\t",
+                       i, tgts[i]);
+
+    slave_steppers[i]->setTargetAbs(tgts[i]);
+    slave_controllers[i]->moveAsync(*slave_steppers[i]);
+  }
+  if (debug) Serial.println();
+}
+
+void syncmove(long a, long b, long c, long d) {
+  long tgts[] = {a, b, c, d};
+  if (debug) Serial.print("primary sync move: ");
+  for (int i = 0; i < 4; i++) {
+    if (debug) aprintf("[%d]: %d\t",
+                       i, tgts[i]);
+
+    master_steppers[i]->setTargetAbs(tgts[i]);
+    master_controllers[i]->moveAsync(*master_steppers[i]);
+  }
+  if (debug) Serial.println();
 }

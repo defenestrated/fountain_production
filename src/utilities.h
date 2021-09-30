@@ -25,12 +25,12 @@ indicator, // light
   log_time, // in ms, how often to report postitions.
   sd_write_time, // defines SD read/write operations, so don't make this too small
   motor_steps_per_rev; // how many steps per one motor revolution
-extern int max_speed, // top speed
-  acceleration ;  // acceleration = steps/sec/sec;
+extern int max_speed; // top speed
+extern float acceleration;  // acceleration = steps/sec/sec;
 
 extern long avg_sens_widths[6];
 extern int activeletter; // for testing purposes
-extern String command; // logical control
+extern const char* command; // logical control
 
 extern long
 whole_revs[6],
@@ -106,7 +106,11 @@ time_t getTeensy3Time();
 void printDigits(int digits);
 
 void home(int letter);
+void startnewcycle();
+void customcycle();
 
+void syncmove(long a, long b);
+void syncmove(long a, long b, long c, long d);
 
 
 #endif

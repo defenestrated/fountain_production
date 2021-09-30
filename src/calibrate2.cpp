@@ -26,12 +26,8 @@ void calibrate2(int letter) {
   master_steppers[letter]->setPosition(fromzero); // rotational location
   positions[letter] = fromzero;
 
-  if (debug) Serial.print("-- calibrating 2 sensor letter ");
-  if (debug) Serial.println(letter);
-  if (debug) Serial.print(" current position: ");
-  if (debug) Serial.println(master_steppers[letter]->getPosition());
-
-
+  if (debug) aprintf("-- calibrating 2 sensor letter %d; current position: %d --\n",
+                     letter, master_steppers[letter]->getPosition());
 
   for (int i = 1; i <= 8; i++) {
     // start swinging back and forth:
@@ -44,8 +40,8 @@ void calibrate2(int letter) {
       target = fromzero + whole_revs[letter]/32*(i+1)/2+avg_sens_widths[letter]*4; // progressively larger units, up to 1/4 turn
     }
 
-    if (debug) Serial.print((dir == 1) ? "+ " : "- ");
-    if (debug) Serial.println(target);
+    if (debug) aprintf("target: %s %d\n", (dir == 1) ? "+ " : "- ", target);
+
     master_steppers[letter]->setTargetAbs(target);
     if (!master_controllers[letter]->isRunning()) master_controllers[letter]->moveAsync(*master_steppers[letter]);
 
@@ -67,12 +63,9 @@ void calibrate2(int letter) {
           s1 = c1;
           s2 = c2;
 
-          if (debug) Serial.print("begin ");
-          if (debug && c1) Serial.print("c1 ");
-          if (debug && c2) Serial.print("c2 ");
-          if (debug && p1) Serial.print("p1 ");
-          if (debug && p2) Serial.print("p2 ");
-          if (debug) Serial.println(ss);
+          if (debug) aprintf("begin, status: %s %s / %s %s at %d\n",
+                             c1 ? "c1" : "__", c2 ? "c2" : "__",
+                             p1 ? "p1" : "__", p2 ? "p2" : "__", ss);
 
           /* controller.stop(); */
           /* if (debug) Serial.print("stopped position: "); */
@@ -85,11 +78,10 @@ void calibrate2(int letter) {
           /*   controller.moveAsync(*master_steppers[letter]); */
 
 
-          if (c1 && c2) { // start of 1 1
+          if (c1 && c2) { // start of 1 1 overlap
             /* ss = master_steppers[letter]->getPosition(); */
-            if (debug) Serial.print("1 1 leading edge: ");
-            Serial.println(ss);
-            Serial.println(master_steppers[letter]->getPosition());
+            // if (debug) aprintf("1 1 leading edge at %d, current pos. = %d",
+                               // ss, master_steppers[letter]->getPosition());
           }
         }
 
@@ -98,42 +90,32 @@ void calibrate2(int letter) {
           se = master_steppers[letter]->getPosition();  // set sensor end
           dist = se-ss; // calculate distance
 
-          if (abs(dist) > 10) {
+            if (debug) aprintf("end, status: %s / %s at %d; abs(dist): %d\n",
+                               c1 ? "c1" : "__", c2 ? "c2" : "__",
+                               p1 ? "p1" : "__", p2 ? "p2" : "__",
+                               se, dist);
 
-            if (debug) Serial.print("end ");
-            if (debug && c1) Serial.print("c1 ");
-            if (debug && c2) Serial.print("c2 ");
-            if (debug && p1) Serial.print("p1 ");
-            if (debug && p2) Serial.print("p2 ");
-
-
-            if (debug) Serial.print(se);
-            if (debug) Serial.print(" dist: ");
-            if (debug) Serial.println(dist);
-
-
-            if (p1 && p2) { // end of 1 1 given width range of the sensor CHECK ON REAL BUILD
-              if (debug) Serial.println("1 1 trailing edge");
+          if (abs(dist) > 10 ) {
+            if (p1 && p2) { // end of 1 1 overlap
+              // if (debug) Serial.println("1 1 trailing edge");
               /* goto endsense; */
             }
 
             if (abs(dist) > avg_sens_widths[letter]*3/4 && abs(dist) < avg_sens_widths[letter]*5/4) { // width range of the sensor CHECK ON REAL BUILD
-              if (debug) Serial.print(":::::: ending sense, abs(dist) = ");
-              if (debug) Serial.print(abs(dist));
-              if (debug) Serial.print(" [avg. ");
-              if (debug) Serial.print(avg_sens_widths[letter]);
-              if (debug) Serial.println("] ::::::");
+
+              if (debug) aprintf("::::: ending sense, abs(dist) = %d [avg. %d] :::::\n",
+                                 dist, avg_sens_widths[letter]);
 
               foundone = true;
               goto endsense;
-            }
-          }
+            } // end correct width
+          } // end irrelevant distance
         } // end trailing edge
-      }
+      } // end state change
 
       p1 = c1;
       p2 = c2;
-    } // end while
+    } // end while is running
 
   }
 
@@ -159,7 +141,7 @@ void calibrate2(int letter) {
 
     if (debug) aprintf("sensors: %d %d\n", sense(lpins[letter][3]), sense(lpins[letter][4]));
 
-    int c = (foundone) ? c = s1 + (s2 * 2 + 2) : 2;
+    int c = (foundone) ? s1 + (s2 * 2 + 2) : 2;
 
   /* int c = s1 + (s2 * 2 + 2); */
   if (debug) aprintf("current sensor sum = %d; ", c);
@@ -212,14 +194,17 @@ void calibrate2(int letter) {
 
   positions[letter] = master_steppers[letter]->getPosition();
 
-  if (debug) aprintf("letter %d calibrated. theta = %f, position = %d\n",
-                     letter, thetas[letter], positions[letter]);
+  if (debug) aprintf("letter %d calibrated. flip? %s theta = %f, position = %d\n",
+                     letter, mockup ?
+                     mockup_flips[letter] ? "yes" : "no"
+                     : build_flips[letter] ? "yes" : "no",
+                     thetas[letter], positions[letter]);
 
   need_to_log = true;
   sd_log = true;
   started = false;
 
 
-  /* home(letter); */
+  home(letter);
 
 } // end calibrate2
