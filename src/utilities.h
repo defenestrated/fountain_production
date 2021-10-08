@@ -9,7 +9,10 @@
 
 // --------------- global variables: ---------------
 
-extern const int chipSelect;
+extern const int chipSelect,
+  start_hour,
+  end_hour,
+  interval_seconds;
 
 extern StepControl *master_controllers[4];
 extern StepControl *slave_controllers[2];
@@ -46,21 +49,24 @@ mockup_period, // time in seconds for one cycle
   speeds[6],
   accelerations[6],
   lpins[][5];
+
 extern bool
 is_primary,
   debug,  // flag to turn on/off serial output
+  loop_cycle,
   searching,
   mockup,
   powertoggle, // indicator as to whether we've disabled the motors or not
   cyclestarted,
-  positionreset,
+  alreadyreset,
+  timecheck,
   need_to_log,
   SDokay,
   force_log,
   log_pos, sd_log, already_written,
   slave_has_queried; // flags to note whether we've logged positions during moves
 
-extern bool mockup_flips[6], build_flips[6];
+extern bool mockup_flips[6], build_flips[6], homed[6];
 extern float thetas[6];
 
 extern const byte numChars;
@@ -94,6 +100,9 @@ void setaccel(int a);
 void list(int m);
 void customcycle(float a, float b, float c, float d, float e, float f);
 void overwriteposition(int m, long pos);
+bool targetsreached();
+bool proportional();
+void verify(int letter);
 
 void SD_read_positions();
 void log_position();

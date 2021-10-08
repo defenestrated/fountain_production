@@ -5,11 +5,15 @@
 #include <SPI.h>
 #include "utilities.h"
 #include "calibrate2.h"
+// #include "calibrate1.h"
+
+/*
+  last time set:
+  1633523928
+  12:38:48 6 10 2021
+ */
 
 #define HWSERIAL Serial1
-
-bool mockup = true, // set false for uploading to the real build
-  debug = true; // flag to turn on/off serial output
 
 bool is_primary = true;
 
@@ -20,10 +24,10 @@ StepControl *slave_controllers[2] = { NULL, NULL };
 
 File logfile;
 
+time_t last_cycle_end_time = 0;
+
 const unsigned int indicator = LED_BUILTIN, // light
   estop = 17, // input from the e-stop.
-  mockup_microsteps = 16,
-  build_microsteps = 8,
   log_time = 250, // in ms, how often to report postitions.
   sd_write_time = 1000, // defines SD read/write operations, so don't make this too small
   motor_steps_per_rev = 400; // how many steps per one motor revolution
@@ -35,29 +39,29 @@ int activeletter = 4; // for testing purposes
 const char* command = ""; // logical control
 
 const long mockup_revs[] = { 4572, 9440, 2229, 6983, 400, 5082 }, // measured manually on the mockup
-  build_revs[] = { 29128, 60082, 14060, 44378, 1091, 29880 }, // real build
-  offsets[] = {0, 0, 0, 0, 0, 0}, // distance from sensor 0 to home position
-  mockup_sens_widths[] = {122, 124, 118, 100, 51, 110},
-  build_sens_widths[] = {115, 112, 98, 100, 175, 128},
+  // build_revs[] = { 29128, 60082, 14060, 44378, 1500, 29880 }, // real build
+  // build_revs[] = {466000, 963000, 228000, 710000, 24000, 478000}, // real build, doubled to avoid fractions. compensate by halving build_microsteps.
+  mockup_sens_widths[] = {120, 125, 117, 94, 51, 110},
+  build_sens_widths[] = {115, 125, 75, 130, 175, 128},
   mockup_speeds[] = { 1942, 2003, 1875, 1972, 33, 1992 },
   build_speeds[] = { 1830, 1890, 1782, 1854, 54, 2022 }
 ;
 
+const float build_revs[] = { 29125, 60069, 14060, 44375, 1500, 29875 };
+
 long whole_revs[6],
- positions[6],
- prev_positions[6],
- targets[6]; // to compare with positions[]
+  positions[6],
+  prev_positions[6],
+  targets[6]; // to compare with positions[]
 
 int speeds[6],
   accelerations[6];
 int mockup_period = 30,
-  build_period = 120; // time in seconds for one cycle
+  build_period = 600; // time in seconds for one cycle -- 600 seems right
 
 
 int certainties[] = { 0, 0, 0, 0, 0, 0 };
 bool searching = false;
-bool build_flips[] = {false, true, true, false, false, false}, // real build
-  mockup_flips[] = {false, false, true, true, false, false}; // real build
 float thetas[6];
 
 const unsigned int txtransfergap = 50;
@@ -78,9 +82,7 @@ int lpins[][5] = { // letter pins. two dimensional array of [letters][pins].
 };
 
 bool
-  powertoggle = true, // indicator as to whether we've disabled the motors or not
-  // cyclestarted = false,
-  // positionreset = false,
+powertoggle = true, // indicator as to whether we've disabled the motors or not
   need_to_log = true,
   SDokay = true,
   force_log = false,
@@ -94,7 +96,7 @@ const byte numChars = 32;
 char receivedChars[numChars];
 char tempChars[numChars];        // temporary array for use when parsing
 
-      // variables to hold the parsed data
+// variables to hold the parsed data
 char HWmsg[numChars] = {0};
 int HWint1 = 0;
 int HWint2 = 0;
@@ -127,12 +129,12 @@ void dealwithit() {
     // sd_log = true;
     log_position();
 
-    if (debug) Serial.print("received secondary positions. new positions: ");
-    for (int i = 0; i < 6; i++) {
-      if (debug) Serial.print(positions[i]);
-      if (debug) Serial.print(" ");
-    }
-    if (debug) Serial.println();
+    // if (debug) Serial.print("received secondary positions. new positions: ");
+    // for (int i = 0; i < 6; i++) {
+      // if (debug) Serial.print(positions[i]);
+      // if (debug) Serial.print(" ");
+    // }
+    // if (debug) Serial.println();
   }
   else if (strcmp(HWmsg, "C") == 0) {
     // query from slave; send positions, then calibration greenlight
@@ -195,20 +197,10 @@ void setup() {
   }
 
 
-  // initiate controllers
+  // initiate controllers + steppers
   for (int i = 0; i < 4; i++) {
     master_controllers[i] = new StepControl();
-  }
-
-  // initiate steppers
-  for (int i = 0; i < 4; i++) {
-      master_steppers[i] = new Stepper(lpins[i][0], lpins[i][1]); // step and dir
-
-      // set speeds + accelerations
-      /* master_steppers[i]->setMaxSpeed(whole_revs[i]*revolutions[i]/period); */
-      /* master_steppers[i]->setMaxSpeed(speeds[i]); */
-      /* master_steppers[i]->setAcceleration(accelerations[i]); */
-      /* master_steppers[i]->setPosition(positions[i]); */
+    master_steppers[i] = new Stepper(lpins[i][0], lpins[i][1]); // step and dir
   }
 
   // calculate speeds, accel, + sensor widths (use gsheet)
@@ -224,7 +216,7 @@ void setup() {
     else {
       whole_revs[i] = build_revs[i] * build_microsteps;
       avg_sens_widths[i] = build_sens_widths[i] * build_microsteps;
-      speeds[i] = build_speeds[i] * build_microsteps;
+      speeds[i] = build_microsteps * build_revs[i] * revolutions[i]/build_period;
       // speeds[i] = build_speeds[i] * 2;
     }
     accelerations[i] = speeds[i] * acceleration;
@@ -246,7 +238,7 @@ void setup() {
   // pin declarations
   for (int s = 0; s < 6; s++) {
     if (debug) aprintf("letter %d: output: s:%d, d:%d, e:%d  |  input_pullup: s1:%d, s2: %d\n",
-                   s, lpins[s][0], lpins[s][1], lpins[s][2], lpins[s][3], lpins[s][4] );
+                       s, lpins[s][0], lpins[s][1], lpins[s][2], lpins[s][3], lpins[s][4] );
     for (int p = 0; p < 5; p++) {
       if (lpins[s][p] != 0) {
         if (p < 3 && s < 4) pinMode(lpins[s][p], OUTPUT);
@@ -269,14 +261,7 @@ void setup() {
   } // hang until estop is reset
 
 
-  int possum;
-  for (int i = 0; i < 6; i++) {
-    if (positions[i] != 0 || whole_revs[i] % positions[i] != 0) possum++;
-    else {
-      overwriteposition((i < 4) ? i : i-4, 0);
-      // positionreset = true;
-    }
-  }
+
 
   /* if (debug) Serial.println("waiting 3secs at end of setup, just... in case."); */
   /* for(int i = 3; i > 0; i--) { */
@@ -290,6 +275,14 @@ void setup() {
 }
 
 void loop() {
+  while (hour() < start_hour || hour() > end_hour) { // off hours; do nothing
+
+    if ( timecheck && second() == 0) {
+      timecheck = false;
+      if (debug) aprintf("sleeping. current time: %dh%dm. set to run between %d:00 and %d:00\n", hour(), minute(), start_hour, end_hour);
+    }
+    if ( !timecheck && second() > 1) timecheck = true;
+  };
   recvWithStartEndMarkers();
   if (newData == true) {
     strcpy(tempChars, receivedChars);
@@ -301,8 +294,11 @@ void loop() {
   }
 
   if (digitalRead(estop) == LOW) command = "shutoff";
+  else if (digitalRead(estop) == HIGH) {
+    if (!powertoggle) command = "powertoggle";
+  }
 
-  // query other board for positions:
+  // update positions:
   for (int i = 0; i < 6; i++) {
     if (i < 4) positions[i] = master_steppers[i]->getPosition();
     else {
@@ -312,26 +308,6 @@ void loop() {
       }
       if (millis() % txtransfergap > txtransfergap * 2 / 3) shouldtxtransfer = true;
     }
-  }
-
-  if (cyclestarted && !need_to_log && positionreset) { // i.e. not moving, but started a cycle
-
-    if (debug) Serial.println("RESETTING POSITIONS");
-    for(int i=0; i<6; i++){
-      int mod = positions[i] % whole_revs[i];
-      int fromzero = (mod > whole_revs[i]/2) ? mod - whole_revs[i] : mod;
-      positions[i] = fromzero;
-      if (i < 4) { master_steppers[i]->setPosition(positions[i]);
-        if (debug) Serial.print(master_steppers[i]->getPosition());
-        if (debug) Serial.print(" ");
-      }
-      hwsend('w', i, positions[i]);
-    }
-    if (debug) Serial.println();
-    positionreset = false;
-    cyclestarted = false;
-    // need_to_log = true;
-    // sd_log = true;
   }
 
   /*           SERIAL INPUT             */
@@ -368,6 +344,9 @@ void loop() {
       break;
     case 104: // h
       command = "softstop";
+      break;
+    case 111: // o
+      proportional();
       break;
     case 112: // p
       command = "powertoggle";
@@ -419,9 +398,24 @@ void loop() {
         }
         break;
       }
-    }
+    case 118: // v
+      {
+        int m = Serial.parseInt();
+        if (m < 4) verify(m);
+        else hwsend('v', m-4, 0);
+        break;
+      }
+    case 115: // s
+      {
+        int l = Serial.parseInt();
+        int c1 = sense(lpins[l][3]);
+        int c2 = sense(lpins[l][4]);
+        if (debug) aprintf("current sensor readings for letter %d: [%d %d]\n", l, c1, c2);
+        break;
+      }
+    } // end switch
 
-    if (debug) aprintf("new command: %s\n", command);
+    if (debug && strcmp(command, "") != 0) aprintf("new command: %s\n", command);
   }
 
   /*             COMMANDS           */
@@ -459,7 +453,8 @@ void loop() {
     }
     for (int i = 0; i < 4; i++) {
       master_controllers[i]->emergencyStop();
-    }    powertoggle = false;
+    }
+    powertoggle = false;
     for (int i = 3; i > 0; i--) {
       if (debug) Serial.print(i);
       if (debug) Serial.print("... ");
@@ -469,9 +464,33 @@ void loop() {
   }
 
   else if (strcmp(command, "cycle") == 0) {
+
     startnewcycle();
   }
+
   command = "";
 
+
+  if (cyclestarted && targetsreached()) {
+    cyclestarted = false;
+    last_cycle_end_time = now();
+    if (debug) aprintf("TARGETS REACHED, END OF CYCLE. time: %d (%dh%dm%ds).\n", now(), hour(), minute(), second());
+    if (debug && loop_cycle) aprintf("looping again in %d seconds.\n", interval_seconds);
+  }
+
+  if (second() % 15 == 0 && timecheck) {
+    timecheck = false;
+    if (debug) aprintf("time check: %d (%dh%dm%ds)\n", now(), hour(), minute(), second());
+
+    if (now() - last_cycle_end_time >= interval_seconds && cyclestarted == false) {
+      if (debug) aprintf("should start now.\n");
+      if (loop_cycle) startnewcycle();
+    }
+  }
+
+
+  if (!timecheck && second() % 15 > 1) timecheck = true;
+
   log_position();
+
 }

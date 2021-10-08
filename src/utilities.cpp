@@ -9,8 +9,31 @@
 
 #define HWSERIAL Serial1
 
-const int revolutions[] = {6, 3, 12, 4, 2, 6}; // number of times to revolve per cycle
-bool cyclestarted = false, positionreset = false;
+const int revolutions[] = {6, 3, 12, 4, 24, 6}; // number of times to revolve per cycle
+const long offsets[] = {0, 0, 0, -300, 750, 0};
+
+bool
+  debug = true,
+  mockup = false,
+  loop_cycle = false,
+  cyclestarted = false,
+  alreadyreset = false,
+  timecheck = true;
+
+const int
+  start_hour = 8,
+  end_hour = 17,
+  interval_seconds = 60;
+
+const unsigned int
+  mockup_microsteps = 16,
+  build_microsteps = 32;
+
+bool
+  homed[] = {false, false, false, false, false, false},
+  build_flips[] = {false, true, true, true, false, false}, // real build
+  mockup_flips[] = {false, false, true, true, false, false}; // real build
+
 
 int aprintf(char const * str, ...) {
   // from https://gist.github.com/EleotleCram/eb586037e2976a8d9884
@@ -94,9 +117,12 @@ void SD_read_positions() {
 
 void log_position() {
 
-  for (int i = 0; i < 4; i++) {
-    positions[i] = master_steppers[i]->getPosition();
-  }
+  // shouldn't need to do this, since it happens at the beginning of the loop:
+  // for (int i = 0; i < 4; i++) {
+  //   positions[i] = master_steppers[i]->getPosition();
+  // }
+
+
   // logs the position once every so often (interval defined global log_time variable)
   int sum = 0;
 
@@ -122,14 +148,19 @@ void log_position() {
 
     if ((millis() % log_time < log_time/3 && log_pos == true) || force_log == true) {
       log_pos = false;
-      if (debug) Serial.println("need to log");
+      // if (debug) Serial.println("need to log");
 
       /* if (debug && sense(E_pins[3]) && sense(E_pins[4])) Serial.print("------->"); */
-      if (debug) Serial.print("positions: ");
+      if (debug) Serial.print("positions[sensors]: ");
       if (debug) {
         for (int i = 0; i < 6; i++) {
-          Serial.print(positions[i]);
-          if (i < 5) Serial.print("\t");
+          if (debug) aprintf("%d", positions[i]);
+          if (i < 5) {
+            if (i < 4) {
+              if (debug) aprintf(" [%d %d]", sense(lpins[i][3]), sense(lpins[i][4]));
+            }
+            if (debug) Serial.print("\t");
+          }
         }
         Serial.println();
       }
@@ -217,12 +248,17 @@ void parseData() {
 }
 
 void absolutemove(int m, long tgt) {
+
+  int tempspeed = (mockup) ? 500 * mockup_microsteps : 500 * build_microsteps;
+
   if (debug) Serial.print("absolute move: motor ");
   if (debug) Serial.print(m, DEC);
   if (debug) Serial.print(", target: ");
   if (debug) Serial.println(tgt, DEC);
   if (is_primary) {
     if (debug) Serial.println("primary");
+    master_steppers[m]->setMaxSpeed(tempspeed);
+    master_steppers[m]->setAcceleration(tempspeed/2);
     master_steppers[m]->setTargetAbs(tgt);
     master_controllers[m]->moveAsync(*master_steppers[m]);
   }
@@ -231,6 +267,8 @@ void absolutemove(int m, long tgt) {
     if (debug) Serial.print(m);
     if (debug) Serial.print(" ");
     if (debug) Serial.println(tgt);
+    slave_steppers[m]->setMaxSpeed(tempspeed);
+    slave_steppers[m]->setAcceleration(tempspeed*2);
     slave_steppers[m]->setTargetAbs(tgt);
     slave_controllers[m]->moveAsync(*slave_steppers[m]);
   }
@@ -270,17 +308,47 @@ void overwriteposition(int m, long pos) {
 }
 
 void home(int letter) {
-
+  homed[letter] = true;
   int mod = positions[letter] % whole_revs[letter];
   /* int fromzero = (mod > whole_revs[letter]/2) ? mod - whole_revs[letter] : mod; */
   int target = (mod > whole_revs[letter]/2) ? whole_revs[letter] : 0; // either go to full rev or 0, whichever's closer
 
+  int off =  (is_primary) ? offsets[letter] : offsets[letter+4];
+  off *= (mockup) ? mockup_microsteps : build_microsteps;
+  target += off;
+  if (debug) aprintf("off: %d, mult.: %d\n", off, (mockup) ? mockup_microsteps : build_microsteps);
+
   if (debug) aprintf("homing letter %d. position: %d, mod: %d, target: %d\n",
                      letter, positions[letter], mod, target);
 
+
+
   if (positions[letter] != target) {
     if (is_primary) {
+      if (debug) aprintf("homing primary letter %d\n", letter);
       // primary movement.
+
+      switch (letter) {
+      case 0:
+        {
+          // collision: 0.750 < g1 < 	0.833	and	o1	0.833	< o1 <	0.931
+          // collsion:  0.967	< g1 <	1.000	and o1	0.056	< o1 <	0.167
+        }
+      case 1:
+        {
+
+        }
+      case 2:
+        {
+
+        }
+      case 3:
+        {
+
+        }
+      }
+
+
 
       master_steppers[letter]->setTargetAbs(target);
       master_controllers[letter]->move(*master_steppers[letter]);
@@ -288,6 +356,20 @@ void home(int letter) {
     }
 
     else {
+      if (debug) aprintf("homing secondary letter %d\n", letter);
+      // secondary movement
+
+      switch (letter) {
+      case 0:
+        {
+          // collision: 0.750 < g1 < 	0.833	and	o1	0.833	< o1 <	0.931
+          // collsion:  0.967	< g1 <	1.000	and o1	0.056	< o1 <	0.167
+        }
+      case 1:
+        {
+
+        }
+      }
       // secondary movement, this one's easy:
       slave_steppers[letter]->setTargetAbs(target);
       slave_controllers[letter]->move(*slave_steppers[letter]);
@@ -303,11 +385,52 @@ void home(int letter) {
 
 void startnewcycle() {
 
+  if (debug) Serial.println("-- resetting positions for new cycle --");
+  for(int i=0; i<6; i++){
+    int mod = positions[i] % whole_revs[i];
+    int fromzero = (mod > whole_revs[i]/2) ? mod - whole_revs[i] : mod;
+    positions[i] = fromzero;
+    if (i < 4) { master_steppers[i]->setPosition(positions[i]);
+      if (debug) Serial.print(master_steppers[i]->getPosition());
+      if (debug) Serial.print(" ");
+    }
+    else hwsend('w', i-4, positions[i]);
+  }
+
   cyclestarted = true;
-  positionreset = false;
+  // alreadyreset = false;
   need_to_log = true;
+  sd_log = true;
 
   customcycle(1, 1, 1, 1, 1, 1);
+}
+
+bool targetsreached() {
+  int reached[6];
+  for (int i = 0; i < 6; i++) {
+    reached[i] = (positions[i] == targets[i]) ? 1 : 0;
+  }
+
+  int sum = 0;
+  for (int s = 0; s < 6; s++) {
+    sum += reached[s];
+  }
+  if (sum == 6) return true;
+  else return false;
+}
+
+bool proportional() {
+  int sum = 0;
+  float cmp[6];
+
+  for (int i = 0; i < 6; i++) {
+    cmp[i] = float(positions[i]) / (float(whole_revs[i])*float(revolutions[i]));
+  }
+
+  if (debug) aprintf("proportions: %f %f %f %f %f %f\n",
+                     cmp[0], cmp[1], cmp[2], cmp[3], cmp[4], cmp[5]);
+  if (sum == 6) return true;
+  else return false;
 }
 
 void customcycle(float a, float b, float c, float d, float e, float f) {
@@ -324,13 +447,15 @@ void customcycle(float a, float b, float c, float d, float e, float f) {
   hwsend('x', targets[4], targets[5]);
 }
 
-
 void syncmove(long a, long b) {
   long tgts[] = {a, b};
   if (debug) Serial.print("secondary sync move: ");
   for (int i = 0; i < 2; i++) {
     if (debug) aprintf("[%d]: %d\t",
                        i, tgts[i]);
+
+    slave_steppers[i]->setMaxSpeed(speeds[i]);
+    slave_steppers[i]->setAcceleration(accelerations[i]);
 
     slave_steppers[i]->setTargetAbs(tgts[i]);
     slave_controllers[i]->moveAsync(*slave_steppers[i]);
@@ -345,8 +470,125 @@ void syncmove(long a, long b, long c, long d) {
     if (debug) aprintf("[%d]: %d\t",
                        i, tgts[i]);
 
+    master_steppers[i]->setMaxSpeed(speeds[i]);
+    master_steppers[i]->setAcceleration(accelerations[i]);
+
     master_steppers[i]->setTargetAbs(tgts[i]);
     master_controllers[i]->moveAsync(*master_steppers[i]);
   }
   if (debug) Serial.println();
 }
+
+void verify(int letter) {
+  int dist,
+    c1 = sense(lpins[letter][3]),
+    c2 = sense(lpins[letter][4]),
+    p1 = sense(lpins[letter][3]),
+    p2 = sense(lpins[letter][4]), // current + previous values
+    ss = 0, se = 0; // sensor start + sensor end
+  bool started = false, not_done_verifying = true;
+
+  StepControl *controller;
+  Stepper *stepper;
+
+  if (is_primary) {
+    controller = master_controllers[letter];
+    stepper = master_steppers[letter];
+  }
+  else {
+    controller = slave_controllers[letter];
+    stepper = slave_steppers[letter];
+  }
+
+  int mod = positions[letter] % whole_revs[letter];
+  int fromzero = (mod > whole_revs[letter]/2) ? mod - whole_revs[letter] : mod;
+
+  positions[letter] = fromzero;
+
+  if (debug) aprintf("-- verifying 2 sensor letter %d; current position: %d; sensors: %d %d --\n",
+                     letter, stepper->getPosition(), sense(lpins[letter][3]), sense(lpins[letter][4]));
+
+
+
+
+  // int tempspeed = (mockup) ? 500 * mockup_microsteps : 500 * build_microsteps;
+
+    stepper->setPosition(fromzero); // rotational location
+    // stepper->setMaxSpeed(tempspeed);
+    // stepper->setAcceleration(tempspeed*4);
+
+    stepper->setTargetRel(avg_sens_widths[letter]*2); // move off the sensor
+    controller->moveAsync(*stepper);
+
+  while (not_done_verifying) {
+    c1 = sense(lpins[letter][3]);
+    c2 = sense(lpins[letter][4]);
+
+    if ((!c1 && !c2) && (p1 || p2)) {
+      if (!started) { // first end of the sensor / pair
+        ss = stepper->getPosition();
+        if (debug) aprintf("first end of sensor at %d\n", ss);
+        controller->stop();
+        stepper->setTargetRel(avg_sens_widths[letter] * -4); // backtrack across sensor
+        controller->moveAsync(*stepper);
+        started = true;
+       }
+
+      else { // second end of the sensor / pair
+        se = stepper->getPosition();
+        dist = (se-ss)/2;
+        if (debug) aprintf("second end of sensor at %d, dist = %d, target = %d\n", se, dist, se+dist/2);
+        controller->stop();
+
+        if (debug) aprintf("after stop: %d ", stepper->getPosition());
+        stepper->setTargetAbs(se + dist/2); // go to center
+        controller->move(*stepper);
+
+        if (debug) aprintf("after move: %d\n", stepper->getPosition());
+
+        int c = sense(lpins[letter][3]) + (sense(lpins[letter][4]) * 2 + 2);
+        if (debug) aprintf("current sensors: [%d %d] sum = %d; ",
+                           sense(lpins[letter][3]), sense(lpins[letter][4]), c);
+
+        switch(c) {
+        case 2:
+          if (debug) Serial.println("0 0");
+          thetas[letter] = 0.5; // 0 0
+          certainties[letter] = 2;
+          break;
+        case 3:
+          if (debug) Serial.println("1 0");
+          if (mockup) thetas[letter] = (mockup_flips[letter]) ? 0.75 : 0.25; // 1 0
+          else thetas[letter] = (build_flips[letter]) ? 0.75 : 0.25; // 1 0
+          certainties[letter] = 1;
+          break;
+        case 4:
+          if (debug) Serial.println("0 1");
+          if (mockup) thetas[letter] = (mockup_flips[letter]) ? 0.25 : 0.75; // 0 1
+          else thetas[letter] = (build_flips[letter]) ? 0.25 : 0.75; // 0 1
+          certainties[letter] = 1;
+          break;
+        case 5:
+          if (debug) Serial.println("1 1");
+          thetas[letter] = 0; // 1 1
+          certainties[letter] = 1;
+          break;
+        }
+
+        if (certainties[letter] == 1) {
+          positions[letter] = thetas[letter]*whole_revs[letter];
+          stepper->setPosition(positions[letter]);
+          if (debug) aprintf("verified. letter %d theta: %f, position set to %d\n",
+                             letter, thetas[letter], positions[letter]);
+          not_done_verifying = false;
+          need_to_log = true;
+          sd_log = true;
+        }
+
+      } // end else (i.e. already started)
+    } // end if no sensor
+
+    p1 = c1;
+    p2 = c2;
+  } // end while
+} // end verify

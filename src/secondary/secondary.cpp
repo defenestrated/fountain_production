@@ -5,12 +5,9 @@
 
 #define HWSERIAL Serial1
 
-bool debug = true;
-
 bool is_primary = false;
 
 const unsigned int indicator = LED_BUILTIN, // light
-  microsteps = 16,
   export_interval = 250;
 // /* int */ acceleration = 6000;  // acceleration = steps/sec/sec;
 
@@ -35,8 +32,8 @@ int lpins[][5] = {
 
   // 0      1   2
   // step, dir, en, s1, nothing
-  {2, 3, 4, 22, 0}, // 0: L
-  {5, 6, 7, 23, 0}, // 1: E
+  {2, 3, 4, 33, 0}, // 0: L
+  {5, 6, 7, 34, 0}, // 1: E
 };
 
 bool
@@ -213,6 +210,10 @@ void dealwithit() {
 
   else if (strcmp(HWmsg, "c") == 0) {
     calibrate1(HWint1);
+  }
+
+  else if (strcmp(HWmsg, "v") == 0) {
+    verify(HWint1);
   }
 
   else if (strcmp(HWmsg, "C") == 0) {
