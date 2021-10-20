@@ -36,13 +36,23 @@ void calibrate1_finish(int letter) {
   slave_steppers[letter]->setMaxSpeed(tempspeed);
   slave_steppers[letter]->setAcceleration(tempspeed*2);
 
+  int mod = positions[letter] % whole_revs[letter];
+  int fromzero = (mod > whole_revs[letter]/2) ? mod - whole_revs[letter] : mod;
+
+
+  if (!is_primary) slave_steppers[letter]->setPosition(fromzero);
+  /* steppers[letter]->setPosition(0); */
+
+
+  if (debug) aprintf("-- calibrating 1 sensor letter %d; current position: %d --\n",
+                     letter, slave_steppers[letter]->getPosition());
 
   if (c1) {
-    if (debug) aprintf("letter %d on sensor. moving off.", letter);
+    if (debug) aprintf("letter %d on sensor. moving off ", letter);
     // verify(letter);
 
-    slave_steppers[letter]->setTargetAbs(avg_sens_widths[letter]*-2);
-    if (debug) aprintf("target: %d... ", avg_sens_widths[letter]*-2);
+    slave_steppers[letter]->setTargetAbs(fromzero + avg_sens_widths[letter]*-4);
+    if (debug) aprintf("target: %d... ", fromzero + avg_sens_widths[letter]*-4);
     slave_controllers[letter]->move(*slave_steppers[letter]);
     if (debug) aprintf("now at position %d, calibrating.\n", slave_steppers[letter]->getPosition());
     positions[letter] = slave_steppers[letter]->getPosition();
@@ -51,25 +61,15 @@ void calibrate1_finish(int letter) {
 
   else {
 
-    int mod = positions[letter] % whole_revs[letter];
-    int fromzero = (mod > whole_revs[letter]/2) ? mod - whole_revs[letter] : mod;
 
-
-    if (!is_primary) slave_steppers[letter]->setPosition(fromzero);
-    /* steppers[letter]->setPosition(0); */
-
-
-    if (debug) aprintf("-- calibrating 1 sensor letter %d; current position: %d --\n",
-                       letter, slave_steppers[letter]->getPosition());
-
-    for (int i = 1; i <= 8; i++) {
+    for (int i = 1; i <= 4; i++) {
 
       // start swinging back and forth:
       if (i % 2 == 0) {
         dir = -1; // switch directions each time
         // if (letter == 4) target = whole_revs[letter]*2*dir;
         // else
-        target = fromzero + (whole_revs[letter]/8*(i/2)+avg_sens_widths[letter]*2)*dir; // progressively larger units, up to 1/2 turn
+        target = fromzero + (whole_revs[letter]/4*(i/2)+avg_sens_widths[letter]*2)*dir; // progressively larger units, up to 1/2 turn
       }
       else {
         dir = 1; // switch directions each time

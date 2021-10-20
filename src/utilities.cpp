@@ -10,20 +10,36 @@
 #define HWSERIAL Serial1
 
 const int revolutions[] = {6, 3, 12, 4, 24, 6}; // number of times to revolve per cycle
-const long offsets[] = {0, 0, 0, -300, 750, 0};
+const long offsets[] = {0, 0, 0, -300, 750, 0},
+  mockup_revs[] = { 4572, 9440, 2229, 6983, 400, 5082 }, // measured manually on the mockup
+  // build_revs[] = { 29128, 60082, 14060, 44378, 1500, 29880 }, // real build
+  // build_revs[] = {466000, 963000, 228000, 710000, 24000, 478000}, // real build, doubled to avoid fractions. compensate by halving build_microsteps.
+  mockup_sens_widths[] = {120, 125, 117, 94, 51, 110},
+  build_sens_widths[] = {115, 125, 94, 150, 175, 128},
+  mockup_speeds[] = { 1942, 2003, 1875, 1972, 33, 1992 },
+  build_speeds[] = { 1830, 1890, 1782, 1854, 54, 2022 }
+;
+
+const float build_revs[] = { 29125, 60069, 14070, 44375, 1500, 29875 };
 
 bool
-  debug = true,
+  debug = false,
+  force_off = false, // set true to pull motors low on startup
   mockup = false,
-  loop_cycle = false,
+  loop_cycle = true,
   cyclestarted = false,
   alreadyreset = false,
-  timecheck = true;
+  timecheck = true,
+  fully_calibrated = false;
 
 const int
   start_hour = 8,
-  end_hour = 17,
-  interval_seconds = 60;
+  end_hour = 18,
+  mockup_period = 30, // time in seconds for one cycle
+  build_period = 600,
+  cycles_before_calibrating = 3,
+  interval_seconds = 60,
+  time_check_interval = 5;
 
 const unsigned int
   mockup_microsteps = 16,
@@ -32,7 +48,11 @@ const unsigned int
 bool
   homed[] = {false, false, false, false, false, false},
   build_flips[] = {false, true, true, true, false, false}, // real build
-  mockup_flips[] = {false, false, true, true, false, false}; // real build
+  mockup_flips[] = {false, false, true, true, false, false},
+  should_be_on_zero[] = {true, true, true, true, true, true},
+  already_moved_off[] = {false, false, false, false, false, false},
+  done_calibrating[] = {false, false, false, false, false, false}
+;
 
 
 int aprintf(char const * str, ...) {
@@ -249,7 +269,7 @@ void parseData() {
 
 void absolutemove(int m, long tgt) {
 
-  int tempspeed = (mockup) ? 500 * mockup_microsteps : 500 * build_microsteps;
+  int tempspeed = (mockup) ? 1000 * mockup_microsteps : 1000 * build_microsteps;
 
   if (debug) Serial.print("absolute move: motor ");
   if (debug) Serial.print(m, DEC);
@@ -380,6 +400,8 @@ void home(int letter) {
   need_to_log = true;
   sd_log = true;
 
+  if (is_primary) done_calibrating[letter] = true;
+  else hwsend('d', letter, 0);
   if (debug) aprintf("motor %d reset to 0\n", letter);
 }
 

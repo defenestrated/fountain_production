@@ -35,19 +35,10 @@ float acceleration = 0.5;  // acceleration. multiplier; each will be set to spee
 
 long avg_sens_widths[]; // rough number of steps it takes to traverse a sensor
 
-int activeletter = 4; // for testing purposes
+int cycle_count = 0, // running cycle tally
+  activeletter = 4; // for testing purposes
 const char* command = ""; // logical control
 
-const long mockup_revs[] = { 4572, 9440, 2229, 6983, 400, 5082 }, // measured manually on the mockup
-  // build_revs[] = { 29128, 60082, 14060, 44378, 1500, 29880 }, // real build
-  // build_revs[] = {466000, 963000, 228000, 710000, 24000, 478000}, // real build, doubled to avoid fractions. compensate by halving build_microsteps.
-  mockup_sens_widths[] = {120, 125, 117, 94, 51, 110},
-  build_sens_widths[] = {115, 125, 75, 130, 175, 128},
-  mockup_speeds[] = { 1942, 2003, 1875, 1972, 33, 1992 },
-  build_speeds[] = { 1830, 1890, 1782, 1854, 54, 2022 }
-;
-
-const float build_revs[] = { 29125, 60069, 14060, 44375, 1500, 29875 };
 
 long whole_revs[6],
   positions[6],
@@ -56,9 +47,6 @@ long whole_revs[6],
 
 int speeds[6],
   accelerations[6];
-int mockup_period = 30,
-  build_period = 600; // time in seconds for one cycle -- 600 seems right
-
 
 int certainties[] = { 0, 0, 0, 0, 0, 0 };
 bool searching = false;
@@ -136,6 +124,11 @@ void dealwithit() {
     // }
     // if (debug) Serial.println();
   }
+  if (strcmp(HWmsg, "d") == 0) {
+    // secondary letter is done calibrating
+    done_calibrating[HWint1+4] = true;
+    if (debug) aprintf("letter %d done calibrating.\n", HWint1+4);
+  }
   else if (strcmp(HWmsg, "C") == 0) {
     // query from slave; send positions, then calibration greenlight
     if (debug) Serial.print("calibration request for slave letter ");
@@ -143,6 +136,48 @@ void dealwithit() {
     hwsend('w', HWint1, positions[HWint1 + 4]);
     hwsend('C', HWint1, 0); // green light signal for calibration
   }
+}
+
+void check_hwserial() {
+  recvWithStartEndMarkers();
+  if (newData == true) {
+    strcpy(tempChars, receivedChars);
+    // this temporary copy is necessary to protect the original data
+    //   because strtok() used in parseData() replaces the commas with \0
+    parseData();
+    dealwithit();
+    newData = false;
+  }
+}
+void calibrate_all() {
+  fully_calibrated = false;
+  for (int i = 0; i < 6; i++) {
+    done_calibrating[i] = false;
+  }
+
+  if (debug) Serial.println("calibrating everything... ");
+  for (int i = 0; i < 6; i++) {
+    if (i > 3) hwsend('c', i-4, 0);
+    else calibrate2(i);
+  }
+
+  while (!fully_calibrated) {
+    check_hwserial();
+    int sum = 0;
+    for (int i = 0; i < 6; i++) {
+      sum += done_calibrating[i];
+    }
+    if (debug && millis() % 1000 < 100) aprintf("calibrations: [%d %d %d %d %d %d], sum = %d\n",
+                       done_calibrating[0],
+                       done_calibrating[1],
+                       done_calibrating[2],
+                       done_calibrating[3],
+                       done_calibrating[4],
+                       done_calibrating[5],
+                       sum);
+    if (sum == 6) fully_calibrated = true;
+  }
+  if (debug) aprintf("all letters calibrated.\n");
 }
 void setup() {
 
@@ -246,7 +281,11 @@ void setup() {
       }
     }
 
-    digitalWrite(lpins[s][2], HIGH); // enable all motors
+    if (force_off) {
+      if (debug) Serial.println("\nFORCE_OFF FLAG SET -- MOTORS DISABLED. SET FALSE IN UTILITIES.CPP TO ENABLE\n");
+      digitalWrite(lpins[s][2], LOW); // enable all motors
+    }
+    else digitalWrite(lpins[s][2], HIGH); // enable all motors
   }
 
   pinMode(indicator, OUTPUT);
@@ -262,40 +301,36 @@ void setup() {
 
 
 
-
-  /* if (debug) Serial.println("waiting 3secs at end of setup, just... in case."); */
-  /* for(int i = 3; i > 0; i--) { */
-  /*   if (debug) Serial.println(i); */
-  /*   digitalWrite(indicator, HIGH); */
-  /*   delay(250); */
-  /*   digitalWrite(indicator, LOW); */
-  /*   delay(750); */
-  /* } */
-  /* if (debug) Serial.println("ok going..."); */
+  if (debug) Serial.println("waiting 5secs at end of setup, just... in case.");
+  for(int i = 5; i > 0; i--) {
+    if (debug) Serial.println(i);
+    digitalWrite(indicator, HIGH);
+    delay(250);
+    digitalWrite(indicator, LOW);
+    delay(750);
+  }
+  if (debug) Serial.println("ok going...");
+  last_cycle_end_time = now();
 }
 
 void loop() {
-  while (hour() < start_hour || hour() > end_hour) { // off hours; do nothing
+  if (cyclestarted == false) {
+    // don't stop awkwardly mid-cycle
+    while (hour() < start_hour || hour() >= end_hour || weekday() == 1 || weekday() == 7) { // off hours; do nothing
 
-    if ( timecheck && second() == 0) {
-      timecheck = false;
-      if (debug) aprintf("sleeping. current time: %dh%dm. set to run between %d:00 and %d:00\n", hour(), minute(), start_hour, end_hour);
-    }
-    if ( !timecheck && second() > 1) timecheck = true;
-  };
-  recvWithStartEndMarkers();
-  if (newData == true) {
-    strcpy(tempChars, receivedChars);
-    // this temporary copy is necessary to protect the original data
-    //   because strtok() used in parseData() replaces the commas with \0
-    parseData();
-    dealwithit();
-    newData = false;
+      if ( timecheck && second() == 0) {
+        timecheck = false;
+        if (debug) aprintf("sleeping. current time: %dh%dm. set to run between %d:00 and %d:00\n", hour(), minute(), start_hour, end_hour);
+      }
+      if ( !timecheck && second() > 1) timecheck = true;
+    };
   }
+
+  check_hwserial();
 
   if (digitalRead(estop) == LOW) command = "shutoff";
   else if (digitalRead(estop) == HIGH) {
-    if (!powertoggle) command = "powertoggle";
+    if (!powertoggle) powertoggle = true;
   }
 
   // update positions:
@@ -337,6 +372,11 @@ void loop() {
         if (debug) Serial.println(l);
         if (l > 3) hwsend('c', l-4, 0);
         else calibrate2(l);
+        break;
+      }
+    case 67: // C
+      {
+        calibrate_all();
         break;
       }
     case 32: // space
@@ -413,6 +453,12 @@ void loop() {
         if (debug) aprintf("current sensor readings for letter %d: [%d %d]\n", l, c1, c2);
         break;
       }
+    case 108: // l
+      {
+      loop_cycle = !loop_cycle;
+      if (debug) aprintf("toggle loop: now set to %s\n", (loop_cycle) ? "true" : "false");
+      break;
+      }
     } // end switch
 
     if (debug && strcmp(command, "") != 0) aprintf("new command: %s\n", command);
@@ -474,22 +520,36 @@ void loop() {
   if (cyclestarted && targetsreached()) {
     cyclestarted = false;
     last_cycle_end_time = now();
-    if (debug) aprintf("TARGETS REACHED, END OF CYCLE. time: %d (%dh%dm%ds).\n", now(), hour(), minute(), second());
+    cycle_count++;
+
+    if (debug) aprintf("TARGETS REACHED, END OF CYCLE #%d. time: %d (%dh%dm%ds).\n", cycle_count, now(), hour(), minute(), second());
+    force_log = true;
+    log_position();
     if (debug && loop_cycle) aprintf("looping again in %d seconds.\n", interval_seconds);
   }
 
-  if (second() % 15 == 0 && timecheck) {
+  if (second() % time_check_interval == 0 && timecheck) {
     timecheck = false;
-    if (debug) aprintf("time check: %d (%dh%dm%ds)\n", now(), hour(), minute(), second());
+
+    int interval = now() - last_cycle_end_time;
+    if (debug) aprintf("time check, today is day %d (sunday = 1): %d (%dh%dm%ds), time since last cycle = %ds\n", weekday(), now(), hour(), minute(), second(), interval);
 
     if (now() - last_cycle_end_time >= interval_seconds && cyclestarted == false) {
       if (debug) aprintf("should start now.\n");
-      if (loop_cycle) startnewcycle();
+      if (loop_cycle) {
+        if (cycle_count >= cycles_before_calibrating) {
+          if (debug) aprintf("calibrating before next run...\n");
+          cycle_count = 0;
+          calibrate_all();
+          startnewcycle();
+        }
+        else startnewcycle();
+      }
     }
   }
 
 
-  if (!timecheck && second() % 15 > 1) timecheck = true;
+  if (!timecheck && second() % time_check_interval >= 1) timecheck = true;
 
   log_position();
 

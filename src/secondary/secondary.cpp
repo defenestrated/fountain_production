@@ -272,7 +272,8 @@ void setup() {
 
 
 
-    digitalWrite(lpins[s][2], HIGH); // enable all motors
+    if (force_off) digitalWrite(lpins[s][2], LOW); // enable all motors
+    else digitalWrite(lpins[s][2], HIGH); // enable all motors
   }
 
   pinMode(indicator, OUTPUT);

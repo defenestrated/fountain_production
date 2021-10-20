@@ -12,12 +12,17 @@
 extern const int chipSelect,
   start_hour,
   end_hour,
-  interval_seconds;
+  cycles_before_calibrating, // how many cycles before re-calibration
+  mockup_period, // time in seconds for one cycle
+  build_period,
+  interval_seconds,
+  time_check_interval;
 
 extern StepControl *master_controllers[4];
 extern StepControl *slave_controllers[2];
 extern Stepper *master_steppers[4];
 extern Stepper *slave_steppers[2];
+
 extern File logfile;
 
 extern const unsigned int
@@ -32,7 +37,8 @@ extern int max_speed; // top speed
 extern float acceleration;  // acceleration = steps/sec/sec;
 
 extern long avg_sens_widths[6];
-extern int activeletter; // for testing purposes
+extern int activeletter, // for testing purposes
+  calib_sum;
 extern const char* command; // logical control
 
 extern long
@@ -40,11 +46,22 @@ whole_revs[6],
   positions[6],
   prev_positions[6],
   targets[6]; // to compare with positions[]// real build, measured manually
-extern const long offsets[6]; // distance from sensor 0 to home position
+
+extern const long offsets[6], // distance from sensor 0 to home position
+  mockup_revs[], // measured manually on the mockup
+  // build_revs[], hand measured
+  mockup_sens_widths[],
+  build_sens_widths[],
+  mockup_speeds[],
+  build_speeds[]
+;
+
+extern const float build_revs[];
+
 extern const int revolutions[6]; // number of times to revolve per cycle
+
 extern int
-mockup_period, // time in seconds for one cycle
-  build_period,
+cycle_count,
   certainties[6],
   speeds[6],
   accelerations[6],
@@ -53,12 +70,14 @@ mockup_period, // time in seconds for one cycle
 extern bool
 is_primary,
   debug,  // flag to turn on/off serial output
+  force_off,
   loop_cycle,
   searching,
   mockup,
   powertoggle, // indicator as to whether we've disabled the motors or not
   cyclestarted,
   alreadyreset,
+  fully_calibrated,
   timecheck,
   need_to_log,
   SDokay,
@@ -66,7 +85,12 @@ is_primary,
   log_pos, sd_log, already_written,
   slave_has_queried; // flags to note whether we've logged positions during moves
 
-extern bool mockup_flips[6], build_flips[6], homed[6];
+extern bool mockup_flips[6],
+  build_flips[6],
+  homed[6],
+  should_be_on_zero[6],
+  already_moved_off[6],
+  done_calibrating[6];
 extern float thetas[6];
 
 extern const byte numChars;
