@@ -10,8 +10,9 @@
 // --------------- global variables: ---------------
 
 extern const int chipSelect,
-  start_hour,
-  end_hour,
+  start_hour, start_minute,
+  end_hour, end_minute,
+  reboot_hour, reboot_minute,
   cycles_before_calibrating, // how many cycles before re-calibration
   mockup_period, // time in seconds for one cycle
   build_period,
@@ -76,6 +77,7 @@ is_primary,
   mockup,
   powertoggle, // indicator as to whether we've disabled the motors or not
   cyclestarted,
+  wasrunning,
   alreadyreset,
   fully_calibrated,
   timecheck,

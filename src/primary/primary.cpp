@@ -9,50 +9,54 @@
 
 /*
   last time set:
-  1633523928
-  12:38:48 6 10 2021
+  111637587512
+  Monday, November 22, 2021 1:25:12 PM
  */
 
-#define HWSERIAL Serial1
+#define HWSERIAL Serial1 // define hardware serial driver (connection to 2nd teensy)
 
-bool is_primary = true;
+#define CPU_RESTART_ADDR (uint32_t *)0xE000ED0C
+#define CPU_RESTART_VAL 0x5FA0004
+#define CPU_RESTART (*CPU_RESTART_ADDR = CPU_RESTART_VAL)
 
-const int chipSelect = BUILTIN_SDCARD;
+bool is_primary = true; // used in shared functions to determine which teensy is asking
+
+const int chipSelect = BUILTIN_SDCARD; // use built-in SD card slot for data logging
 
 StepControl *master_controllers[4] = {NULL, NULL, NULL, NULL}; // controller objects -- one per stepper, to avoid Bresenham. first four steppers here, last two on slave.
-StepControl *slave_controllers[2] = { NULL, NULL };
+StepControl *slave_controllers[2] = { NULL, NULL }; // included here so that the two can share functions
 
-File logfile;
+File logfile; // where to store the position logs
 
-time_t last_cycle_end_time = 0;
+time_t last_cycle_end_time = 0; // timestamp of last cycle's finish
 
 const unsigned int indicator = LED_BUILTIN, // light
   estop = 17, // input from the e-stop.
   log_time = 250, // in ms, how often to report postitions.
-  sd_write_time = 1000, // defines SD read/write operations, so don't make this too small
+  sd_write_time = 1000, // governs SD read/write operations, so don't make this too small
   motor_steps_per_rev = 400; // how many steps per one motor revolution
 float acceleration = 0.5;  // acceleration. multiplier; each will be set to speeds[i] * acceleration
 
-long avg_sens_widths[]; // rough number of steps it takes to traverse a sensor
+long avg_sens_widths[]; // rough number of steps it takes to traverse a sensor. defined in setup.
 
 int cycle_count = 0, // running cycle tally
   activeletter = 4; // for testing purposes
 const char* command = ""; // logical control
 
 
-long whole_revs[6],
-  positions[6],
-  prev_positions[6],
+long whole_revs[6], // steps in a whole revolution
+  positions[6], // current position
+  prev_positions[6], // last position
   targets[6]; // to compare with positions[]
 
-int speeds[6],
-  accelerations[6];
+int speeds[6], // speeds of each individual ring
+  accelerations[6]; // accelerations of each ring
 
-int certainties[] = { 0, 0, 0, 0, 0, 0 };
+int certainties[] = { 0, 0, 0, 0, 0, 0 }; // do we know where we are? 0 = no, 1 = yes, 2 = ish (in the quadrant with no sensors)
 bool searching = false;
-float thetas[6];
+float thetas[6]; // rotational position (0-1)
 
-const unsigned int txtransfergap = 50;
+const unsigned int txtransfergap = 50; // how often to sync with 2nd teensy (in ms)
 bool shouldtxtransfer = true;
 
 /* TEENSY */
@@ -71,14 +75,14 @@ int lpins[][5] = { // letter pins. two dimensional array of [letters][pins].
 
 bool
 powertoggle = true, // indicator as to whether we've disabled the motors or not
-  need_to_log = true,
-  SDokay = true,
-  force_log = false,
+  need_to_log = true, // flag used in log timing
+  SDokay = true, // sd card status
+  force_log = false, // used for certain logging overrides
   log_pos = true, sd_log = true, already_written = false; // flags to note whether we've logged positions during moves
 
 // initiate stepper array (will be populated in setup)
 Stepper *master_steppers[4] = { NULL, NULL, NULL, NULL };
-Stepper *slave_steppers[2] = { NULL, NULL };
+Stepper *slave_steppers[2] = { NULL, NULL }; // see above, unused here
 
 const byte numChars = 32;
 char receivedChars[numChars];
@@ -316,11 +320,23 @@ void setup() {
 void loop() {
   if (cyclestarted == false) {
     // don't stop awkwardly mid-cycle
-    while (hour() < start_hour || hour() >= end_hour || weekday() == 1 || weekday() == 7) { // off hours; do nothing
+
+    while ((hour() < start_hour || hour() > end_hour)
+           || (hour() == start_hour && minute() < start_minute)
+           || (hour() == end_hour && minute() >= end_minute)
+           || weekday() == 1 || weekday() == 7) { // off hours; do nothing
 
       if ( timecheck && second() == 0) {
         timecheck = false;
-        if (debug) aprintf("sleeping. current time: %dh%dm. set to run between %d:00 and %d:00\n", hour(), minute(), start_hour, end_hour);
+
+        if (debug) aprintf("was running: %d, reboot at: %d:%d", wasrunning, reboot_hour, reboot_minute);
+        if (wasrunning && hour() >= reboot_hour && minute() >= reboot_minute) {
+          hwsend('R', 0, 0);
+          if (debug) aprintf("REBOOTING");
+          CPU_RESTART;
+        }
+
+        if (debug) aprintf("sleeping. current time: %dh%dm. set to run between %dh%dm and %dh%dm\n", hour(), minute(), start_hour, start_minute, end_hour, end_minute);
       }
       if ( !timecheck && second() > 1) timecheck = true;
     };
@@ -536,6 +552,8 @@ void loop() {
 
     if (now() - last_cycle_end_time >= interval_seconds && cyclestarted == false) {
       if (debug) aprintf("should start now.\n");
+      wasrunning = true;
+
       if (loop_cycle) {
         if (cycle_count >= cycles_before_calibrating) {
           if (debug) aprintf("calibrating before next run...\n");

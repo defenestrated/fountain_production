@@ -30,11 +30,16 @@ bool
   cyclestarted = false,
   alreadyreset = false,
   timecheck = true,
-  fully_calibrated = false;
+  fully_calibrated = false,
+  wasrunning = false;
 
 const int
   start_hour = 8,
+  start_minute = 0,
   end_hour = 18,
+  end_minute = 0,
+  reboot_hour = 21,
+  reboot_minute = 0,
   mockup_period = 30, // time in seconds for one cycle
   build_period = 600,
   cycles_before_calibrating = 3,
