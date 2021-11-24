@@ -24,7 +24,7 @@ const float build_revs[] = { 29125, 60069, 14070, 44375, 1500, 29875 };
 
 bool
   debug = false,
-  force_off = false, // set true to pull motors low on startup
+  force_off = false, // set true to pull motors low on startup -- disables everything. useful if you want to run the fountain without movement.
   mockup = false,
   loop_cycle = true,
   cyclestarted = false,
