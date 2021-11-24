@@ -9,14 +9,14 @@ All six letters are coordinated, moving at relative speeds in classical harmonic
 Each ring is driven by its own dedicated stepper motor, so although the rings _appear_ to be geared together, they spin independently. For this reason, all accelerations and speeds must be carefully calculated so as to avoid collisions.
 
 Here are some characteristics of how the rings relate to each other, with the stepper drivers set to 32 microsteps:
-| letter  | rotations per cycle | steps per one rotation*
-|:-:|:-:|:-:|:-:|
-|`G` | 6 | 29125								
-|`o1` | 3 | 60069
-|`o2` | 12 | 14070
-|`g` | 4 | 44375
-|`l` | 24 | 1500
-|`e` | 6 | 29875
+| letter | rotations per cycle | steps per one rotation* |
+|:------:|:-------------------:|:-----------------------:|
+| `G`    | 6                   | 29125                   |
+| `o1`   | 3                   | 60069                   |
+| `o2`   | 12                  | 14070                   |
+| `g`    | 4                   | 44375                   |
+| `l`    | 24                  | 1500                    |
+| `e`    | 6                   | 29875                   |
 
 *For some reason, these differ in real life from what they should be based on the gear ratios. Something got lost in translation… these values are measured manually on the real build.
 
@@ -80,22 +80,22 @@ For convenience, I’ve left copies of the firmware for each Teensy in the `firm
 ## DEBUG MODE:
 If, in `utilities.cpp`, `debug` is set to `true`, you can interact with the sculpture via serial commands sent to the primary Teensy. The commands / syntax are as follows:
 
-| key command  | function  | syntax  | example
-|:-:|:-:|:--|:--|
-| `space`  | software e-stop  |   |   |
-| `h`  | soft stop  |   |   |
-| `p`  | toggle motor enable  |   |   |
-| `q`  | read positions from sd card  |   |   |
-| `Q`  | log current positions to sd card  |   |   |
-| `m`  | move one letter to target  | `m [letter] [target]`  | `m 3 50000` <br />moves second ‘g’ to position 50000<br />letters are zero-indexed.  |
-| `w`  | set one letter’s position  | `w [letter] [new position]`  | `w 4 2000` <br />set position of ‘l’ to 2000 |
-| `W`  | set all positions to 0  |   |   |
-| `s`  | read sensors of letter | `s [letter]` | `s 1` <br />outputs sensor readings for first ‘o’
-| `l`  | toggle automatic looping
-| `c`  | calibrate single letter* | `c [letter]` | `c 2` <br />calibrate second ‘o’<br />
-| `c`  | calibrate all letters*
-| `x`  | initiate full cycle**
-| `X`  | initiate fraction of a cycle\*** | `X [frac] [frac] [frac] [frac] [frac] [frac]` | `X 0.1 0.1 0.1 0.1 0.1 0.1` <br />move all letters in synchrony to 1/10th of a full cycle.
+| key command | function                         | syntax                                        | example                                                                                    |
+|:-----------:|:--------------------------------:|:----------------------------------------------|:-------------------------------------------------------------------------------------------|
+| `space`     | software e-stop                  |                                               |                                                                                            |
+| `h`         | soft stop                        |                                               |                                                                                            |
+| `p`         | toggle motor enable              |                                               |                                                                                            |
+| `q`         | read positions from sd card      |                                               |                                                                                            |
+| `Q`         | log current positions to sd card |                                               |                                                                                            |
+| `m`         | move one letter to target        | `m [letter] [target]`                         | `m 3 50000` <br />moves second ‘g’ to position 50000<br />letters are zero-indexed.        |
+| `w`         | set one letter’s position        | `w [letter] [new position]`                   | `w 4 2000` <br />set position of ‘l’ to 2000                                               |
+| `W`         | set all positions to 0           |                                               |                                                                                            |
+| `s`         | read sensors of letter           | `s [letter]`                                  | `s 1` <br />outputs sensor readings for first ‘o’                                          |
+| `l`         | toggle automatic looping         |                                               |                                                                                            |
+| `c`         | calibrate single letter*         | `c [letter]`                                  | `c 2` <br />calibrate second ‘o’<br />                                                     |
+| `c`         | calibrate all letters*           |                                               |                                                                                            |
+| `x`         | initiate full cycle**            |                                               |                                                                                            |
+| `X`         | initiate fraction of a cycle\*** | `X [frac] [frac] [frac] [frac] [frac] [frac]` | `X 0.1 0.1 0.1 0.1 0.1 0.1` <br />move all letters in synchrony to 1/10th of a full cycle. |
 
 ***CAUTION: the calibration sequence is blocking (meaning, you can’t stop it once it’s going without hitting the e-stop), and will cause the letter to traverse 1/4 turn before either returning to where it started (no sensor found) or returning to home. Make triply sure it won’t hit anything en route!**
 
