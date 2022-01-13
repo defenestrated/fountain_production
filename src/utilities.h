@@ -78,6 +78,7 @@ is_primary,
   powertoggle, // indicator as to whether we've disabled the motors or not
   cyclestarted,
   wasrunning,
+  lunchtime,
   alreadyreset,
   fully_calibrated,
   timecheck,

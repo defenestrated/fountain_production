@@ -560,8 +560,16 @@ void loop() {
     int interval = now() - last_cycle_end_time; // time elapsed
     if (debug) aprintf("time check, today is day %d (sunday = 1): %d (%dh%dm%ds), time since last cycle = %ds\n", weekday(), now(), hour(), minute(), second(), interval);
 
-    if (now() - last_cycle_end_time >= interval_seconds && cyclestarted == false) {
-      // interval has elapsed, and we're in between cycles
+    if (hour() >= 12 && hour() <= 14) lunchtime = true;
+    else if (hour() < 12 || hour() > 14) lunchtime = false;
+
+    if (debug) aprintf("lunchtime = %d ", lunchtime);
+
+    // if (now() - last_cycle_end_time >= interval_seconds && cyclestarted == false) { // interval mode
+    // interval has elapsed, and we're in between cycles
+    if (((lunchtime && minute() % 30 == 0) || (!lunchtime && minute() == 0)) && cyclestarted == false) {
+      // on the hour, except during lunchtime (on the half hour)
+
       if (debug) aprintf("should start now.\n");
       wasrunning = true;
 

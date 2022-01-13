@@ -31,7 +31,8 @@ bool
   alreadyreset = false,
   timecheck = true,
   fully_calibrated = false,
-  wasrunning = false;
+  wasrunning = false,
+  lunchtime = false;
 
 const int
   start_hour = 8,
@@ -42,7 +43,7 @@ const int
   reboot_minute = 0,
   mockup_period = 30, // time in seconds for one cycle
   build_period = 600,
-  cycles_before_calibrating = 3,
+  cycles_before_calibrating = 2,
   interval_seconds = 60,
   time_check_interval = 5;
 
