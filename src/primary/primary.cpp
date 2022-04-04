@@ -160,12 +160,20 @@ void calibrate_all() {
   fully_calibrated = false; // flag to indicate we're not ready
   for (int i = 0; i < 6; i++) { // set each individual "done" flag false to start
     done_calibrating[i] = false;
+    if (disable_g && i == 3) {
+      done_calibrating[i] = true; // bypass g2 if it's mechanically disabled
+    }
   }
 
   if (debug) Serial.println("calibrating everything... ");
   for (int i = 0; i < 6; i++) { // for each letter
     if (i > 3) hwsend('c', i-4, 0); // if it's on the secondary teensy, request calibration
-    else calibrate2(i); // otherwise calibrate it
+    else {
+      if (disable_g && i == 3) {
+        if (debug) aprintf("> > > skipping g2 calibration < < <\n");
+      }
+      else calibrate2(i); // otherwise calibrate it
+    }
   }
 
   while (!fully_calibrated) { // stay here until everything is calibrated

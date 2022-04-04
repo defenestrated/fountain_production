@@ -23,10 +23,11 @@ const long offsets[] = {0, 0, 0, -300, 750, 0},
 const float build_revs[] = { 29125, 60069, 14070, 44375, 1500, 29875 };
 
 bool
-  debug = true,
+  debug = false,
+  disable_g = true, // temporary flag to accommodate disabled g2 (and bypass calibration)
   force_off = false, // set true to pull motors low on startup -- disables everything. useful if you want to run the fountain without movement.
   mockup = false,
-  loop_cycle = false,
+  loop_cycle = true,
   cyclestarted = false,
   alreadyreset = false,
   timecheck = true,

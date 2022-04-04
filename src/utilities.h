@@ -71,6 +71,7 @@ cycle_count,
 extern bool
 is_primary,
   debug,  // flag to turn on/off serial output
+  disable_g,
   force_off,
   loop_cycle,
   searching,
