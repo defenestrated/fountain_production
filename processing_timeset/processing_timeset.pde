@@ -25,7 +25,7 @@ import java.util.Date;
 import java.util.Calendar;
 import java.util.GregorianCalendar;
 
-public static final short portIndex = 3;  // select the com port, 0 is the first port
+public static final short portIndex = 4;  // select the com port, 0 is the first port
 public static final String TIME_HEADER = "T"; //header for arduino serial time message 
 public static final char TIME_REQUEST = 7;  // ASCII bell character 
 public static final char LF = 10;     // ASCII linefeed
