@@ -23,10 +23,10 @@ const long offsets[] = {0, 0, 0, -300, 750, 0},
 const float build_revs[] = { 29125, 60069, 14070, 44375, 1500, 29875 };
 
 bool
-  debug = true,
+  debug = false,
   force_off = false, // set true to pull motors low on startup -- disables everything. useful if you want to run the fountain without movement.
   mockup = false,
-  loop_cycle = false,
+  loop_cycle = true,
   cyclestarted = false,
   alreadyreset = false,
   timecheck = true,
@@ -42,7 +42,7 @@ const int
   reboot_hour = 21,
   reboot_minute = 0,
   mockup_period = 30, // time in seconds for one cycle
-  build_period = 600,
+  build_period = 420,
   cycles_before_calibrating = 2,
   interval_seconds = 60,
   time_check_interval = 5;
